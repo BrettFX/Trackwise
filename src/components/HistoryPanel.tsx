@@ -11,11 +11,7 @@ interface HistoryPanelProps {
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
+    month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
   });
 }
 
@@ -38,47 +34,43 @@ function StorySnapshotSummary({ stories }: { stories: StoryEntry[] }) {
 }
 
 function HistoryEntry({
-  update,
-  onLoad,
-  onLoadSnapshot,
-  onDelete,
+  update, onLoad, onLoadSnapshot, onDelete,
 }: {
   update: SavedUpdate;
   onLoad: (u: SavedUpdate) => void;
   onLoadSnapshot: (parent: SavedUpdate, stories: StoryEntry[]) => void;
   onDelete: (id: string) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
   const hasChangelog = update.changelog && update.changelog.length > 0;
 
   return (
     <li className="border-b border-gray-100 last:border-b-0">
-      {/* Main row */}
+      {/* Main row — clicking name/chevron toggles preview */}
       <div className="flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors">
-        <div className="flex flex-col gap-0.5 min-w-0">
-          <span className="text-sm font-medium text-gray-800 truncate">{update.name}</span>
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-gray-400">
-              {formatDate(update.createdAt)} · {update.stories.length} {update.stories.length === 1 ? 'story' : 'stories'}
-            </span>
-            {hasChangelog && (
-              <span className="text-xs text-indigo-400 font-medium">
-                {update.changelog.length} revision{update.changelog.length !== 1 ? 's' : ''}
+        <button
+          className="flex items-center gap-2 min-w-0 flex-1 text-left"
+          onClick={() => setExpanded((o) => !o)}
+        >
+          {expanded
+            ? <ChevronUp className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+            : <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-sm font-medium text-gray-800 truncate">{update.name}</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-gray-400">
+                {formatDate(update.createdAt)} · {update.stories.length} {update.stories.length === 1 ? 'story' : 'stories'}
               </span>
-            )}
+              {hasChangelog && (
+                <span className="text-xs text-indigo-400 font-medium">
+                  {update.changelog.length} checkpoint{update.changelog.length !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
           </div>
-        </div>
+        </button>
         <div className="flex items-center gap-1 ml-4 shrink-0">
-          {hasChangelog && (
-            <button
-              onClick={() => setChangelogOpen((o) => !o)}
-              title="View changelog"
-              className="flex items-center gap-1 text-xs font-semibold text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 px-2 py-1.5 rounded-lg transition-colors"
-            >
-              <History className="w-3.5 h-3.5" />
-              {changelogOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-            </button>
-          )}
           <button
             onClick={() => onLoad(update)}
             className="flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition-colors"
@@ -94,51 +86,65 @@ function HistoryEntry({
         </div>
       </div>
 
-      {/* Changelog */}
-      {changelogOpen && hasChangelog && (
+      {/* Expanded panel: current stories preview + optional changelog */}
+      {expanded && (
         <div className="bg-slate-50 border-t border-gray-100 px-5 py-4">
-          <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Revision History</p>
-          <div className="relative">
-            {/* Timeline line */}
-            <div className="absolute left-[7px] top-2 bottom-2 w-px bg-indigo-100" />
-            <div className="flex flex-col gap-4">
-              {/* Oldest to newest */}
-              {[...update.changelog].map((snap, idx) => (
-                <div key={idx} className="flex gap-3 items-start">
-                  <div className="w-3.5 h-3.5 rounded-full bg-white border-2 border-indigo-300 mt-0.5 shrink-0 z-10" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1.5 gap-2">
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-xs font-semibold text-gray-500">{formatDate(snap.savedAt)}</span>
-                        {snap.note && (
-                          <span className="text-xs text-indigo-600 font-medium italic">"{snap.note}"</span>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => onLoadSnapshot(update, snap.stories)}
-                        className="text-xs font-semibold text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded-lg transition-colors shrink-0"
-                      >
-                        Load this
-                      </button>
-                    </div>
-                    <div className="bg-white rounded-lg border border-gray-200 p-3">
-                      <StorySnapshotSummary stories={snap.stories} />
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {/* Current version marker */}
-              <div className="flex gap-3 items-start">
-                <div className="w-3.5 h-3.5 rounded-full bg-indigo-500 border-2 border-indigo-500 mt-0.5 shrink-0 z-10" />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="text-xs font-semibold text-indigo-600">Current version</span>
-                    <span className="text-xs text-gray-400">(loaded via Load button above)</span>
-                  </div>
-                </div>
-              </div>
-            </div>
+
+          {/* Current stories preview */}
+          <div className="bg-white rounded-lg border border-gray-200 p-3 mb-3">
+            <StorySnapshotSummary stories={update.stories} />
           </div>
+
+          {/* Changelog toggle — only if checkpoints exist */}
+          {hasChangelog && (
+            <>
+              <button
+                onClick={() => setChangelogOpen((o) => !o)}
+                className="flex items-center gap-1.5 text-xs font-semibold text-indigo-500 hover:text-indigo-700 mb-3 transition-colors"
+              >
+                <History className="w-3.5 h-3.5" />
+                {changelogOpen ? 'Hide' : 'View'} revision history ({update.changelog.length} checkpoint{update.changelog.length !== 1 ? 's' : ''})
+                {changelogOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              </button>
+
+              {changelogOpen && (
+                <div className="relative">
+                  <div className="absolute left-[7px] top-2 bottom-2 w-px bg-indigo-100" />
+                  <div className="flex flex-col gap-4">
+                    {[...update.changelog].map((snap, idx) => (
+                      <div key={idx} className="flex gap-3 items-start">
+                        <div className="w-3.5 h-3.5 rounded-full bg-white border-2 border-indigo-300 mt-0.5 shrink-0 z-10" />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between mb-1.5 gap-2">
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-xs font-semibold text-gray-500">{formatDate(snap.savedAt)}</span>
+                              {snap.note && (
+                                <span className="text-xs text-indigo-600 font-medium italic">"{snap.note}"</span>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => onLoadSnapshot(update, snap.stories)}
+                              className="text-xs font-semibold text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded-lg transition-colors shrink-0"
+                            >
+                              Load this
+                            </button>
+                          </div>
+                          <div className="bg-white rounded-lg border border-gray-200 p-3">
+                            <StorySnapshotSummary stories={snap.stories} />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {/* Current version cap */}
+                    <div className="flex gap-3 items-center">
+                      <div className="w-3.5 h-3.5 rounded-full bg-indigo-500 border-2 border-indigo-500 shrink-0 z-10" />
+                      <span className="text-xs font-semibold text-indigo-600">Current version</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </li>
