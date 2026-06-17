@@ -1,5 +1,6 @@
 
-import { X, GripVertical } from 'lucide-react';
+import { useState } from 'react';
+import { X, GripVertical, ChevronDown, ChevronUp } from 'lucide-react';
 import type { StoryEntry } from '../types';
 
 interface StoryCardProps {
@@ -12,6 +13,11 @@ interface StoryCardProps {
 }
 
 export default function StoryCard({ story, index, total, errors, onChange, onRemove }: StoryCardProps) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  // Show a summary line when collapsed
+  const summaryLabel = story.title.trim() || `Story ${index + 1}`;
+  const hasErrors = Object.keys(errors).length > 0;
   function extractTicketFromUrl(url: string): string | null {
     const match = url.match(/\/([A-Z]+-\d+)\s*$/i);
     return match ? match[1].toUpperCase() : null;
@@ -80,38 +86,54 @@ export default function StoryCard({ story, index, total, errors, onChange, onRem
   );
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-      {/* Card header */}
-      <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-200">
-        <div className="flex items-center gap-2">
-          <GripVertical className="w-4 h-4 text-gray-300" />
-          <span className="text-xs font-bold uppercase tracking-widest text-indigo-500">
-            Story {index + 1} of {total}
+    <div className={`bg-white border rounded-xl shadow-sm overflow-hidden transition-all ${hasErrors ? 'border-red-300' : 'border-gray-200'}`}>
+      {/* Card header — click to collapse/expand */}
+      <div
+        className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-200 cursor-pointer select-none hover:bg-gray-100 transition-colors"
+        onClick={() => setCollapsed((c) => !c)}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <GripVertical className="w-4 h-4 text-gray-300 shrink-0" />
+          <span className="text-xs font-bold uppercase tracking-widest text-indigo-500 shrink-0">
+            Story {index + 1}
           </span>
+          {collapsed && (
+            <span className="text-xs text-gray-500 truncate ml-1">— {summaryLabel}</span>
+          )}
+          {hasErrors && collapsed && (
+            <span className="text-xs text-red-400 font-semibold ml-1 shrink-0">⚠ incomplete</span>
+          )}
         </div>
-        {total > 1 && (
-          <button
-            onClick={() => onRemove(story.id)}
-            className="flex items-center gap-1 text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded transition-colors"
-          >
-            <X className="w-3.5 h-3.5" /> Remove
-          </button>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {total > 1 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onRemove(story.id); }}
+              className="flex items-center gap-1 text-xs text-red-400 hover:text-red-600 hover:bg-red-50 px-2 py-1 rounded transition-colors"
+            >
+              <X className="w-3.5 h-3.5" /> Remove
+            </button>
+          )}
+          {collapsed
+            ? <ChevronDown className="w-4 h-4 text-gray-400" />
+            : <ChevronUp className="w-4 h-4 text-gray-400" />}
+        </div>
       </div>
 
-      {/* Fields */}
-      <div className="p-5 flex flex-col gap-4">
-        {field('title', 'Story Title', true, 'e.g. Implement Glue ETL for CUR 2.0 Cost Insights')}
+      {/* Fields — hidden when collapsed */}
+      {!collapsed && (
+        <div className="p-5 flex flex-col gap-4">
+          {field('title', 'Story Title', true, 'e.g. Implement Glue ETL for CUR 2.0 Cost Insights')}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {field('jiraUrl', 'Jira URL', false, 'https://jira.faa.gov/browse/…', false, 'Paste URL to auto-fill Ticket # — or enter Ticket # to auto-fill URL')}
-          {field('ticketNumber', 'Jira Ticket #', false, 'e.g. FCSCCE-9124', false)}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {field('jiraUrl', 'Jira URL', false, 'https://jira.faa.gov/browse/…', false, 'Paste URL to auto-fill Ticket # — or enter Ticket # to auto-fill URL')}
+            {field('ticketNumber', 'Jira Ticket #', false, 'e.g. FCSCCE-9124', false)}
+          </div>
+
+          {field('yesterday', 'Yesterday', false, 'What did you work on yesterday?', true)}
+          {field('today', 'Today', true, 'What are you working on today?', true)}
+          {field('blockers', 'Blockers', false, 'Any blockers? Leave blank for "None"', true)}
         </div>
-
-        {field('yesterday', 'Yesterday', false, 'What did you work on yesterday?', true)}
-        {field('today', 'Today', true, 'What are you working on today?', true)}
-        {field('blockers', 'Blockers', false, 'Any blockers? Leave blank for "None"', true)}
-      </div>
+      )}
     </div>
   );
 }

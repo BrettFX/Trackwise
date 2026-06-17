@@ -113,18 +113,20 @@ function App() {
 
   // ── Load / delete ────────────────────────────────────────────────────
   function handleLoad(update: SavedUpdate) {
-    setStories(update.stories.map((s) => ({ ...s })));
+    const loaded = update.stories.map((s) => ({ ...s }));
+    setStories(loaded);
     setCurrentUpdateId(update.id);
     setSaveName(update.name);
-    setHtmlOutput('');
+    setHtmlOutput(formatOutputHTML(loaded));
     setErrors({});
   }
 
   function handleLoadSnapshot(parentUpdate: SavedUpdate, snapshotStories: StoryEntry[]) {
-    setStories(snapshotStories.map((s) => ({ ...s })));
+    const loaded = snapshotStories.map((s) => ({ ...s }));
+    setStories(loaded);
     setCurrentUpdateId(parentUpdate.id);
     setSaveName(parentUpdate.name);
-    setHtmlOutput('');
+    setHtmlOutput(formatOutputHTML(loaded));
     setErrors({});
   }
 
@@ -152,7 +154,7 @@ function App() {
         {/* Header */}
         <div className="mb-8 text-center">
           <div className="inline-flex items-center gap-2 bg-indigo-600 text-white px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest mb-4">
-            <Zap className="w-3.5 h-3.5" /> YTB Status Formatter
+            <Zap className="w-3.5 h-3.5" /> Trackwise
           </div>
           <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Daily Status Update</h1>
           <p className="text-gray-500 mt-1 text-sm">Fill in your stories and generate a Teams-ready YTB update.</p>
