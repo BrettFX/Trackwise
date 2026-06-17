@@ -10,6 +10,7 @@ export interface StoryEntry {
 
 export interface UpdateSnapshot {
   savedAt: string;
+  note?: string;        // optional label the user adds at checkpoint time
   stories: StoryEntry[];
 }
 

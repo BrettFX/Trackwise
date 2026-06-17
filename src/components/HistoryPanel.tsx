@@ -108,7 +108,12 @@ function HistoryEntry({
                   <div className="w-3.5 h-3.5 rounded-full bg-white border-2 border-indigo-300 mt-0.5 shrink-0 z-10" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-1.5 gap-2">
-                      <span className="text-xs font-semibold text-gray-500">{formatDate(snap.savedAt)}</span>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-xs font-semibold text-gray-500">{formatDate(snap.savedAt)}</span>
+                        {snap.note && (
+                          <span className="text-xs text-indigo-600 font-medium italic">"{snap.note}"</span>
+                        )}
+                      </div>
                       <button
                         onClick={() => onLoadSnapshot(update, snap.stories)}
                         className="text-xs font-semibold text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded-lg transition-colors shrink-0"

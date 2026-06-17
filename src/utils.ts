@@ -41,20 +41,65 @@ export function saveAsNew(name: string, stories: StoryEntry[]): SavedUpdate {
   return update;
 }
 
-/** Overwrite an existing entry, pushing its current stories into the changelog first. */
-export function saveOverwrite(id: string, name: string, stories: StoryEntry[]): SavedUpdate | null {
+/** Silently sync stories/name — no changelog entry created. */
+export function silentSave(id: string, name: string, stories: StoryEntry[]): SavedUpdate | null {
   const all = loadSavedUpdates();
   const idx = all.findIndex((u) => u.id === id);
   if (idx < 0) return null;
+  all[idx].name = name.trim() || all[idx].name;
+  all[idx].stories = stories;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+  return all[idx];
+}
+
+/** Content fingerprint for diff guard — compares meaningful text fields only. */
+function contentFingerprint(stories: StoryEntry[]): string {
+  return JSON.stringify(
+    stories.map((s) => ({
+      title: s.title.trim(),
+      ticketNumber: s.ticketNumber.trim(),
+      yesterday: s.yesterday.trim(),
+      today: s.today.trim(),
+      blockers: s.blockers.trim(),
+    }))
+  );
+}
+
+/**
+ * Save a named checkpoint. Only creates a changelog entry if the stories differ
+ * from the last checkpoint (diff guard). Returns whether a checkpoint was saved.
+ */
+export function saveCheckpoint(
+  id: string,
+  note: string,
+  stories: StoryEntry[]
+): { saved: boolean; update: SavedUpdate | null } {
+  const all = loadSavedUpdates();
+  const idx = all.findIndex((u) => u.id === id);
+  if (idx < 0) return { saved: false, update: null };
 
   const existing = all[idx];
-  const snapshot: UpdateSnapshot = { savedAt: new Date().toISOString(), stories: existing.stories };
+
+  // Diff guard: compare against last checkpoint, or current stored stories if none.
+  const reference =
+    existing.changelog.length > 0
+      ? existing.changelog[existing.changelog.length - 1].stories
+      : existing.stories;
+
+  if (contentFingerprint(stories) === contentFingerprint(reference)) {
+    return { saved: false, update: existing };
+  }
+
+  const snapshot: UpdateSnapshot = {
+    savedAt: new Date().toISOString(),
+    note: note.trim() || undefined,
+    stories,
+  };
   existing.changelog = [...existing.changelog, snapshot];
-  existing.name = name.trim() || existing.name;
   existing.stories = stories;
   all[idx] = existing;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
-  return existing;
+  return { saved: true, update: existing };
 }
 
 export function deleteUpdate(id: string): void {
