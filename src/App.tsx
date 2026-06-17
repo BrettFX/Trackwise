@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Plus, Zap, Save, RefreshCw, Bookmark, FilePlus, Check } from 'lucide-react';
+import { Plus, Zap, Save, RefreshCw, Bookmark, FilePlus, Check, ChevronsUpDown } from 'lucide-react';
 import StoryCard from './components/StoryCard';
 import OutputPanel from './components/OutputPanel';
 import HistoryPanel from './components/HistoryPanel';
@@ -20,6 +20,27 @@ function App() {
   // Silent save feedback
   const [silentSavedFeedback, setSilentSavedFeedback] = useState(false);
 
+  // Collapsed story cards
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
+
+  const toggleCard = useCallback((id: string) => {
+    setCollapsedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const allCollapsed = stories.length > 0 && stories.every((s) => collapsedIds.has(s.id));
+
+  function toggleAll() {
+    if (allCollapsed) {
+      setCollapsedIds(new Set());
+    } else {
+      setCollapsedIds(new Set(stories.map((s) => s.id)));
+    }
+  }
+
   // Checkpoint modal
   const [checkpointPrompt, setCheckpointPrompt] = useState(false);
   const [checkpointNote, setCheckpointNote] = useState('');
@@ -36,9 +57,13 @@ function App() {
 
   const handleRemove = useCallback((id: string) => {
     setStories((prev) => prev.filter((s) => s.id !== id));
+    setCollapsedIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
   }, []);
 
-  const addStory = () => setStories((prev) => [...prev, makeEmptyStory()]);
+  const addStory = () => {
+    const story = makeEmptyStory();
+    setStories((prev) => [...prev, story]);
+  };
 
   function validate(): boolean {
     const newErrors: typeof errors = {};
@@ -266,13 +291,29 @@ function App() {
         )}
 
         {/* Story cards */}
-        <div className="flex flex-col gap-5 mb-5">
+        <div className="flex items-center justify-between mb-3 px-1">
+          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+            {stories.length} {stories.length === 1 ? 'Story' : 'Stories'}
+          </span>
+          {stories.length > 1 && (
+            <button
+              onClick={toggleAll}
+              className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition-colors"
+            >
+              <ChevronsUpDown className="w-3.5 h-3.5" />
+              {allCollapsed ? 'Expand All' : 'Collapse All'}
+            </button>
+          )}
+        </div>
+        <div className="flex flex-col gap-3 mb-5">
           {stories.map((story, idx) => (
             <StoryCard
               key={story.id}
               story={story}
               index={idx}
               total={stories.length}
+              collapsed={collapsedIds.has(story.id)}
+              onToggleCollapse={toggleCard}
               errors={errors[story.id] ?? {}}
               onChange={handleChange}
               onRemove={handleRemove}

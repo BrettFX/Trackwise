@@ -1,5 +1,4 @@
 
-import { useState } from 'react';
 import { X, GripVertical, ChevronDown, ChevronUp } from 'lucide-react';
 import type { StoryEntry } from '../types';
 
@@ -7,15 +6,14 @@ interface StoryCardProps {
   story: StoryEntry;
   index: number;
   total: number;
+  collapsed: boolean;
+  onToggleCollapse: (id: string) => void;
   errors: Partial<Record<keyof StoryEntry, string>>;
   onChange: (id: string, field: keyof StoryEntry, value: string) => void;
   onRemove: (id: string) => void;
 }
 
-export default function StoryCard({ story, index, total, errors, onChange, onRemove }: StoryCardProps) {
-  const [collapsed, setCollapsed] = useState(false);
-
-  // Show a summary line when collapsed
+export default function StoryCard({ story, index, total, collapsed, onToggleCollapse, errors, onChange, onRemove }: StoryCardProps) {
   const summaryLabel = story.title.trim() || `Story ${index + 1}`;
   const hasErrors = Object.keys(errors).length > 0;
   function extractTicketFromUrl(url: string): string | null {
@@ -90,7 +88,7 @@ export default function StoryCard({ story, index, total, errors, onChange, onRem
       {/* Card header — click to collapse/expand */}
       <div
         className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-200 cursor-pointer select-none hover:bg-gray-100 transition-colors"
-        onClick={() => setCollapsed((c) => !c)}
+        onClick={() => onToggleCollapse(story.id)}
       >
         <div className="flex items-center gap-2 min-w-0">
           <GripVertical className="w-4 h-4 text-gray-300 shrink-0" />
