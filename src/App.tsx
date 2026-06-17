@@ -1,10 +1,12 @@
-import { useState, useCallback } from 'react';
-import { Plus, Zap, Save, RefreshCw, Bookmark, FilePlus, Check, ChevronsUpDown } from 'lucide-react';
+import { useState, useCallback, useRef } from 'react';
+import { Plus, Zap, Save, RefreshCw, Bookmark, FilePlus, Check, ChevronsUpDown, Trash2, TriangleAlert } from 'lucide-react';
 import StoryCard from './components/StoryCard';
 import OutputPanel from './components/OutputPanel';
 import HistoryPanel from './components/HistoryPanel';
+import ImportModal from './components/ImportModal';
+import VersionInfo from './components/VersionInfo';
 import type { StoryEntry, SavedUpdate } from './types';
-import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate } from './utils';
+import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, exportUpdates, hasUnsavedChanges } from './utils';
 
 function App() {
   const [stories, setStories] = useState<StoryEntry[]>([makeEmptyStory()]);
@@ -16,6 +18,7 @@ function App() {
   // Save-as-new modal
   const [saveNamePrompt, setSaveNamePrompt] = useState(false);
   const [saveName, setSaveName] = useState('');
+  const afterSaveRef = useRef<(() => void) | null>(null);
 
   // Silent save feedback
   const [silentSavedFeedback, setSilentSavedFeedback] = useState(false);
@@ -110,6 +113,11 @@ function App() {
     setCurrentUpdateId(saved.id);
     setSaveName(saved.name);
     setSaveNamePrompt(false);
+    if (afterSaveRef.current) {
+      const fn = afterSaveRef.current;
+      afterSaveRef.current = null;
+      fn();
+    }
   }
 
   // ── Checkpoint ───────────────────────────────────────────────────────
@@ -161,6 +169,47 @@ function App() {
     if (currentUpdateId === id) { setCurrentUpdateId(null); setSaveName(''); }
   }
 
+  // ── Delete confirmation ──────────────────────────────────────────────
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
+  function requestDelete(id: string) {
+    setPendingDeleteId(id);
+  }
+
+  function confirmDelete() {
+    if (!pendingDeleteId) return;
+    handleDelete(pendingDeleteId);
+    setPendingDeleteId(null);
+  }
+
+  // ── Export / Import ──────────────────────────────────────────────────
+  function handleExport() {
+    exportUpdates();
+  }
+
+  const [importOpen, setImportOpen] = useState(false);
+  const [unsavedWarning, setUnsavedWarning] = useState(false);
+
+  function openImport() {
+    if (hasUnsavedChanges(currentUpdateId, stories)) {
+      setUnsavedWarning(true);
+    } else {
+      setImportOpen(true);
+    }
+  }
+
+  function handleImportDone(importedUpdates: import('./types').SavedUpdate[]) {
+    setHistory(loadSavedUpdates());
+    setImportOpen(false);
+    // Auto-load the most recently created imported update
+    if (importedUpdates.length > 0) {
+      const newest = importedUpdates.reduce((a, b) =>
+        new Date(a.createdAt) >= new Date(b.createdAt) ? a : b
+      );
+      handleLoad(newest);
+    }
+  }
+
   function handleClear() {
     if (!confirm('Clear all stories and start fresh?')) return;
     setStories([makeEmptyStory()]);
@@ -183,6 +232,9 @@ function App() {
           </div>
           <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Daily Status Update</h1>
           <p className="text-gray-500 mt-1 text-sm">Fill in your stories and generate a Teams-ready YTB update.</p>
+          <div className="mt-2">
+            <VersionInfo />
+          </div>
         </div>
 
         {/* Save-as-new modal */}
@@ -272,12 +324,92 @@ function App() {
           </div>
         )}
 
+        {/* Delete confirmation modal */}
+        {pendingDeleteId !== null && (() => {
+          const target = history.find((u) => u.id === pendingDeleteId);
+          return (
+            <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-9 h-9 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                    <Trash2 className="w-4 h-4 text-red-500" />
+                  </div>
+                  <h2 className="text-base font-bold text-gray-900">Delete Update</h2>
+                </div>
+                <p className="text-sm text-gray-600 mb-5">
+                  Are you sure you want to delete{' '}
+                  <span className="font-semibold text-gray-800">&ldquo;{target?.name ?? 'this update'}&rdquo;</span>?
+                  This will also remove its entire revision history and cannot be undone.
+                </p>
+                <div className="flex gap-3 justify-end">
+                  <button
+                    onClick={() => setPendingDeleteId(null)}
+                    className="text-sm px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmDelete}
+                    className="flex items-center gap-2 text-sm px-4 py-2 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Unsaved changes warning */}
+        {unsavedWarning && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-9 h-9 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                  <TriangleAlert className="w-4 h-4 text-amber-500" />
+                </div>
+                <h2 className="text-base font-bold text-gray-900">Unsaved Changes</h2>
+              </div>
+              <p className="text-sm text-gray-600 mb-5">
+                You have unsaved changes that will be replaced when you load imported updates. Would you like to save your work first?
+              </p>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={() => { setUnsavedWarning(false); afterSaveRef.current = () => setImportOpen(true); openSaveAsNewPrompt(); }}
+                  className="w-full flex items-center justify-center gap-2 text-sm px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-colors"
+                >
+                  <Save className="w-3.5 h-3.5" /> Save First
+                </button>
+                <button
+                  onClick={() => { setUnsavedWarning(false); setImportOpen(true); }}
+                  className="w-full text-sm px-4 py-2.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
+                >
+                  Continue Without Saving
+                </button>
+                <button
+                  onClick={() => setUnsavedWarning(false)}
+                  className="w-full text-sm px-4 py-2.5 text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Import modal */}
+        {importOpen && (
+          <ImportModal onClose={() => setImportOpen(false)} onImported={handleImportDone} />
+        )}
+
         {/* History */}
         <HistoryPanel
           history={history}
           onLoad={handleLoad}
           onLoadSnapshot={handleLoadSnapshot}
-          onDelete={handleDelete}
+          onDelete={requestDelete}
+          onExport={handleExport}
+          onImport={openImport}
         />
 
         {/* Current update badge */}

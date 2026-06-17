@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Trash2, RotateCcw, ChevronDown, ChevronUp, Clock, History } from 'lucide-react';
+import { Trash2, RotateCcw, ChevronDown, ChevronUp, Clock, History, Download, Upload } from 'lucide-react';
 import type { SavedUpdate, StoryEntry } from '../types';
 
 interface HistoryPanelProps {
@@ -7,6 +7,8 @@ interface HistoryPanelProps {
   onLoad: (update: SavedUpdate) => void;
   onLoadSnapshot: (parentUpdate: SavedUpdate, snapshotStories: StoryEntry[]) => void;
   onDelete: (id: string) => void;
+  onExport: () => void;
+  onImport: () => void;
 }
 
 function formatDate(iso: string) {
@@ -151,27 +153,52 @@ function HistoryEntry({
   );
 }
 
-export default function HistoryPanel({ history, onLoad, onLoadSnapshot, onDelete }: HistoryPanelProps) {
+export default function HistoryPanel({ history, onLoad, onLoadSnapshot, onDelete, onExport, onImport }: HistoryPanelProps) {
   const [open, setOpen] = useState(true);
-
-  if (history.length === 0) return null;
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden mb-6">
-      <button
-        className="w-full flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-200 hover:bg-gray-100 transition-colors"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <div className="flex items-center gap-2">
+      {/* Header row */}
+      <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-200">
+        <button
+          className="flex items-center gap-2 hover:text-indigo-600 transition-colors"
+          onClick={() => setOpen((o) => !o)}
+        >
           <Clock className="w-4 h-4 text-indigo-400" />
           <span className="text-xs font-bold uppercase tracking-widest text-gray-500">
             Saved Updates ({history.length})
           </span>
-        </div>
-        {open ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
-      </button>
+          {open ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+        </button>
 
-      {open && (
+        {/* Export / Import */}
+        <div className="flex items-center gap-1">
+          {history.length > 0 && (
+            <button
+              onClick={onExport}
+              title="Export all saved updates to JSON"
+              className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition-colors"
+            >
+              <Download className="w-3.5 h-3.5" /> Export
+            </button>
+          )}
+          <button
+            onClick={onImport}
+            title="Import saved updates from JSON"
+            className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition-colors"
+          >
+            <Upload className="w-3.5 h-3.5" /> Import
+          </button>
+        </div>
+      </div>
+
+      {open && history.length === 0 && (
+        <div className="px-5 py-8 text-center text-sm text-gray-400">
+          No saved updates yet. Save an update or import a file to get started.
+        </div>
+      )}
+
+      {open && history.length > 0 && (
         <ul>
           {history.map((update) => (
             <HistoryEntry
