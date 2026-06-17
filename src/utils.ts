@@ -1,4 +1,4 @@
-import type { StoryEntry, SavedUpdate } from './types';
+import type { StoryEntry, SavedUpdate, UpdateSnapshot } from './types';
 
 const STORAGE_KEY = 'ytb-saved-updates';
 
@@ -17,21 +17,44 @@ function toHtmlLines(str: string): string {
 export function loadSavedUpdates(): SavedUpdate[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as SavedUpdate[]) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as SavedUpdate[];
+    // Migrate entries that predate the changelog field
+    return parsed.map((u) => ({ ...u, changelog: u.changelog ?? [] }));
   } catch {
     return [];
   }
 }
 
-export function saveUpdate(update: SavedUpdate): void {
+/** Create a brand-new saved entry with an empty changelog. */
+export function saveAsNew(name: string, stories: StoryEntry[]): SavedUpdate {
+  const update: SavedUpdate = {
+    id: crypto.randomUUID(),
+    name: name.trim() || `Update – ${new Date().toLocaleString()}`,
+    createdAt: new Date().toISOString(),
+    stories,
+    changelog: [],
+  };
   const all = loadSavedUpdates();
-  const existing = all.findIndex((u) => u.id === update.id);
-  if (existing >= 0) {
-    all[existing] = update;
-  } else {
-    all.unshift(update);
-  }
+  all.unshift(update);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+  return update;
+}
+
+/** Overwrite an existing entry, pushing its current stories into the changelog first. */
+export function saveOverwrite(id: string, name: string, stories: StoryEntry[]): SavedUpdate | null {
+  const all = loadSavedUpdates();
+  const idx = all.findIndex((u) => u.id === id);
+  if (idx < 0) return null;
+
+  const existing = all[idx];
+  const snapshot: UpdateSnapshot = { savedAt: new Date().toISOString(), stories: existing.stories };
+  existing.changelog = [...existing.changelog, snapshot];
+  existing.name = name.trim() || existing.name;
+  existing.stories = stories;
+  all[idx] = existing;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+  return existing;
 }
 
 export function deleteUpdate(id: string): void {

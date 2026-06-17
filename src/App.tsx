@@ -4,7 +4,7 @@ import StoryCard from './components/StoryCard';
 import OutputPanel from './components/OutputPanel';
 import HistoryPanel from './components/HistoryPanel';
 import type { StoryEntry, SavedUpdate } from './types';
-import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveUpdate, deleteUpdate } from './utils';
+import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, saveOverwrite, deleteUpdate } from './utils';
 
 function App() {
   const [stories, setStories] = useState<StoryEntry[]>([makeEmptyStory()]);
@@ -50,25 +50,43 @@ function App() {
 
   function openSavePrompt() {
     if (!validate()) return;
-    setSaveName(saveName || (stories[0]?.title ? `${stories[0].title} – ${new Date().toLocaleDateString()}` : ''));
+    if (!saveName) {
+      setSaveName(stories[0]?.title ? `${stories[0].title} – ${new Date().toLocaleDateString()}` : '');
+    }
     setSaveNamePrompt(true);
   }
 
-  function confirmSave() {
-    const name = saveName.trim() || `Update – ${new Date().toLocaleString()}`;
-    const id = currentUpdateId ?? crypto.randomUUID();
-    const update: SavedUpdate = { id, name, createdAt: new Date().toISOString(), stories };
-    saveUpdate(update);
-    setHistory(loadSavedUpdates());
-    setCurrentUpdateId(id);
+  function confirmSaveOverwrite() {
+    if (!currentUpdateId) return;
+    const updated = saveOverwrite(currentUpdateId, saveName, stories);
+    if (updated) {
+      setHistory(loadSavedUpdates());
+      setSaveName(updated.name);
+    }
     setSaveNamePrompt(false);
-    setSaveName('');
+  }
+
+  function confirmSaveAsNew() {
+    const saved = saveAsNew(saveName, stories);
+    setHistory(loadSavedUpdates());
+    setCurrentUpdateId(saved.id);
+    setSaveName(saved.name);
+    setSaveNamePrompt(false);
   }
 
   function handleLoad(update: SavedUpdate) {
     setStories(update.stories.map((s) => ({ ...s })));
     setCurrentUpdateId(update.id);
     setSaveName(update.name);
+    setHtmlOutput('');
+    setErrors({});
+  }
+
+  function handleLoadSnapshot(parentUpdate: SavedUpdate, snapshotStories: StoryEntry[]) {
+    setStories(snapshotStories.map((s) => ({ ...s })));
+    // Keep parent update context so user can overwrite or save-as-new
+    setCurrentUpdateId(parentUpdate.id);
+    setSaveName(parentUpdate.name);
     setHtmlOutput('');
     setErrors({});
   }
@@ -88,9 +106,13 @@ function App() {
     setSaveName('');
   }
 
+  const isEditing = currentUpdateId !== null;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50 py-10 px-4">
       <div className="max-w-3xl mx-auto">
+
+        {/* Header */}
         <div className="mb-8 text-center">
           <div className="inline-flex items-center gap-2 bg-indigo-600 text-white px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest mb-4">
             <Zap className="w-3.5 h-3.5" /> YTB Status Formatter
@@ -99,34 +121,73 @@ function App() {
           <p className="text-gray-500 mt-1 text-sm">Fill in your stories and generate a Teams-ready YTB update.</p>
         </div>
 
+        {/* Save modal */}
         {saveNamePrompt && (
           <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md">
               <h2 className="text-lg font-bold text-gray-900 mb-1">Save Update</h2>
-              <p className="text-sm text-gray-500 mb-4">Give this update a name so you can load it later.</p>
+              <p className="text-sm text-gray-500 mb-4">
+                {isEditing
+                  ? 'Update the existing entry (current state moves to its changelog) or save a brand-new copy.'
+                  : 'Give this update a name so you can load it later.'}
+              </p>
+              <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">Name</label>
               <input
                 autoFocus
                 type="text"
                 value={saveName}
                 onChange={(e) => setSaveName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && confirmSave()}
+                onKeyDown={(e) => { if (e.key === 'Enter') isEditing ? confirmSaveOverwrite() : confirmSaveAsNew(); }}
                 placeholder="e.g. Sprint 42 – Day 3"
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-5 focus:outline-none focus:ring-2 focus:ring-indigo-300"
               />
-              <div className="flex gap-3 justify-end">
-                <button onClick={() => setSaveNamePrompt(false)} className="text-sm px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+              <div className={`flex gap-3 ${isEditing ? 'justify-between' : 'justify-end'}`}>
+                <button
+                  onClick={() => setSaveNamePrompt(false)}
+                  className="text-sm px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
+                >
                   Cancel
                 </button>
-                <button onClick={confirmSave} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-colors">
-                  Save
-                </button>
+                <div className="flex gap-2">
+                  {isEditing && (
+                    <button
+                      onClick={confirmSaveAsNew}
+                      className="text-sm px-4 py-2 rounded-lg border border-indigo-200 text-indigo-600 font-semibold hover:bg-indigo-50 transition-colors"
+                    >
+                      Save as New
+                    </button>
+                  )}
+                  <button
+                    onClick={isEditing ? confirmSaveOverwrite : confirmSaveAsNew}
+                    className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-colors"
+                  >
+                    {isEditing ? 'Update Existing' : 'Save'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         )}
 
-        <HistoryPanel history={history} onLoad={handleLoad} onDelete={handleDelete} />
+        {/* History */}
+        <HistoryPanel
+          history={history}
+          onLoad={handleLoad}
+          onLoadSnapshot={handleLoadSnapshot}
+          onDelete={handleDelete}
+        />
 
+        {/* Current update badge */}
+        {isEditing && (
+          <div className="flex items-center gap-2 mb-4 px-1">
+            <span className="text-xs text-gray-500">Editing:</span>
+            <span className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full truncate max-w-xs">
+              {saveName || 'Unnamed Update'}
+            </span>
+          </div>
+        )}
+
+        {/* Story cards */}
         <div className="flex flex-col gap-5 mb-5">
           {stories.map((story, idx) => (
             <StoryCard
@@ -141,6 +202,7 @@ function App() {
           ))}
         </div>
 
+        {/* Add story */}
         <button
           onClick={addStory}
           className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-indigo-200 text-indigo-500 text-sm font-semibold hover:border-indigo-400 hover:bg-indigo-50 transition-colors mb-6"
@@ -148,6 +210,7 @@ function App() {
           <Plus className="w-4 h-4" /> Add Story
         </button>
 
+        {/* Action bar */}
         <div className="flex flex-wrap gap-3 mb-6">
           <button
             onClick={handleGenerate}
@@ -160,7 +223,7 @@ function App() {
             className="flex items-center gap-2 bg-white border border-gray-200 text-gray-700 text-sm font-semibold px-5 py-2.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
           >
             <Save className="w-4 h-4" />
-            {currentUpdateId ? 'Update Saved' : 'Save Update'}
+            {isEditing ? 'Save Update' : 'Save as New'}
           </button>
           <button
             onClick={handleClear}
@@ -170,6 +233,7 @@ function App() {
           </button>
         </div>
 
+        {/* Output */}
         <OutputPanel htmlOutput={htmlOutput} />
 
         <p className="text-center text-xs text-gray-400 mt-6">Saved updates are stored locally in your browser.</p>

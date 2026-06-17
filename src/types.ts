@@ -8,9 +8,15 @@ export interface StoryEntry {
   blockers: string;
 }
 
+export interface UpdateSnapshot {
+  savedAt: string;
+  stories: StoryEntry[];
+}
+
 export interface SavedUpdate {
   id: string;
   name: string;
   createdAt: string;
   stories: StoryEntry[];
+  changelog: UpdateSnapshot[]; // ordered oldest → newest
 }
