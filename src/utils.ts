@@ -1,6 +1,26 @@
-import type { StoryEntry, SavedUpdate, UpdateSnapshot } from './types';
+import type { StoryEntry, SavedUpdate, UpdateSnapshot, StoryStatus, TaskType, OutputSettings } from './types';
 
 const STORAGE_KEY = 'ytb-saved-updates';
+const OUTPUT_SETTINGS_KEY = 'trackwise-output-settings';
+
+export const DEFAULT_OUTPUT_SETTINGS: OutputSettings = {
+  showStatus: true,
+  excludeStatuses: [],
+};
+
+export function loadOutputSettings(): OutputSettings {
+  try {
+    const raw = localStorage.getItem(OUTPUT_SETTINGS_KEY);
+    if (!raw) return { ...DEFAULT_OUTPUT_SETTINGS };
+    return { ...DEFAULT_OUTPUT_SETTINGS, ...JSON.parse(raw) };
+  } catch {
+    return { ...DEFAULT_OUTPUT_SETTINGS };
+  }
+}
+
+export function saveOutputSettings(settings: OutputSettings): void {
+  localStorage.setItem(OUTPUT_SETTINGS_KEY, JSON.stringify(settings));
+}
 
 function escapeHtml(str: string): string {
   return str
@@ -19,8 +39,16 @@ export function loadSavedUpdates(): SavedUpdate[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as SavedUpdate[];
-    // Migrate entries that predate the changelog field
-    return parsed.map((u) => ({ ...u, changelog: u.changelog ?? [] }));
+    // Migrate entries: add changelog if missing, add status/taskType to stories if missing
+    return parsed.map((u) => ({
+      ...u,
+      changelog: u.changelog ?? [],
+      stories: u.stories.map((s) => ({
+        ...s,
+        status: s.status ?? 'not-started',
+        taskType: s.taskType ?? 'task',
+      })),
+    }));
   } catch {
     return [];
   }
@@ -56,11 +84,13 @@ export function silentSave(id: string, name: string, stories: StoryEntry[]): Sav
 function contentFingerprint(stories: StoryEntry[]): string {
   return JSON.stringify(
     stories.map((s) => ({
+      taskType: s.taskType,
       title: s.title.trim(),
       ticketNumber: s.ticketNumber.trim(),
       yesterday: s.yesterday.trim(),
       today: s.today.trim(),
       blockers: s.blockers.trim(),
+      status: s.status,
     }))
   );
 }
@@ -104,6 +134,14 @@ export function saveCheckpoint(
 
 export function deleteUpdate(id: string): void {
   const all = loadSavedUpdates().filter((u) => u.id !== id);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+}
+
+export function renameUpdate(id: string, newName: string): void {
+  const all = loadSavedUpdates();
+  const idx = all.findIndex((u) => u.id === id);
+  if (idx < 0) return;
+  all[idx].name = newName.trim() || all[idx].name;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
 }
 
@@ -281,21 +319,45 @@ export function hasUnsavedChanges(currentUpdateId: string | null, stories: Story
   return current !== contentFingerprint(saved.stories);
 }
 
-export function formatOutputHTML(stories: StoryEntry[]): string {
-  const blocks = stories.map((story) => {
+const STATUS_LABELS: Record<StoryStatus, string> = {
+  'not-started': 'Not Started',
+  'in-progress': 'In Progress',
+  'done': 'Done',
+  'blocked': 'Blocked',
+};
+
+export const TASK_TYPE_LABELS: Record<TaskType, string> = {
+  task: 'Task',
+  story: 'Story',
+  spike: 'Spike',
+};
+
+export function formatOutputHTML(stories: StoryEntry[], settings: OutputSettings = DEFAULT_OUTPUT_SETTINGS): string {
+  const excluded = new Set(settings.excludeStatuses);
+  const filtered = stories.filter((s) => !excluded.has(s.status ?? 'not-started'));
+
+  if (filtered.length === 0) return '';
+
+  const blocks = filtered.map((story) => {
+    const typeLabel = TASK_TYPE_LABELS[story.taskType ?? 'task'];
+    const href = escapeHtml(story.jiraUrl);
+    const linkAttrs = `href="${href}" target="_blank" rel="noopener noreferrer"`;
     let storyLine: string;
     if (story.title && story.jiraUrl && story.ticketNumber) {
-      storyLine = `<b>Story:</b> <a href="${escapeHtml(story.jiraUrl)}">${escapeHtml(story.title)} (${escapeHtml(story.ticketNumber)})</a>`;
+      storyLine = `<b>${typeLabel}:</b> <a ${linkAttrs}>${escapeHtml(story.title)} (${escapeHtml(story.ticketNumber)})</a>`;
     } else if (story.title && story.jiraUrl) {
-      storyLine = `<b>Story:</b> <a href="${escapeHtml(story.jiraUrl)}">${escapeHtml(story.title)}</a>`;
+      storyLine = `<b>${typeLabel}:</b> <a ${linkAttrs}>${escapeHtml(story.title)}</a>`;
     } else if (story.title && story.ticketNumber) {
-      storyLine = `<b>Story:</b> ${escapeHtml(story.title)} (${escapeHtml(story.ticketNumber)})`;
+      storyLine = `<b>${typeLabel}:</b> ${escapeHtml(story.title)} (${escapeHtml(story.ticketNumber)})`;
     } else {
-      storyLine = `<b>Story:</b> ${escapeHtml(story.title)}`;
+      storyLine = `<b>${typeLabel}:</b> ${escapeHtml(story.title)}`;
     }
+
+    const status = story.status ?? 'not-started';
 
     return [
       `<p>${storyLine}</p>`,
+      ...(settings.showStatus ? [`<p><b>Status:</b> ${STATUS_LABELS[status]}</p>`] : []),
       `<p><b>Yesterday:</b> ${toHtmlLines(story.yesterday.trim() || 'None')}</p>`,
       `<p><b>Today:</b> ${toHtmlLines(story.today.trim())}</p>`,
       `<p><b>Blockers:</b> ${toHtmlLines(story.blockers.trim() || 'None')}</p>`,
@@ -306,5 +368,5 @@ export function formatOutputHTML(stories: StoryEntry[]): string {
 }
 
 export function makeEmptyStory(): StoryEntry {
-  return { id: crypto.randomUUID(), title: '', ticketNumber: '', jiraUrl: '', yesterday: '', today: '', blockers: '' };
+  return { id: crypto.randomUUID(), taskType: 'task', title: '', ticketNumber: '', jiraUrl: '', yesterday: '', today: '', blockers: '', status: 'not-started' };
 }

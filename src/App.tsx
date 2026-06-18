@@ -5,8 +5,10 @@ import OutputPanel from './components/OutputPanel';
 import HistoryPanel from './components/HistoryPanel';
 import ImportModal from './components/ImportModal';
 import VersionInfo from './components/VersionInfo';
+import OutputSettingsPanel from './components/OutputSettingsPanel';
 import type { StoryEntry, SavedUpdate } from './types';
-import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, exportUpdates, hasUnsavedChanges } from './utils';
+import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, renameUpdate, exportUpdates, hasUnsavedChanges, loadOutputSettings, saveOutputSettings } from './utils';
+import type { OutputSettings } from './types';
 
 function App() {
   const [stories, setStories] = useState<StoryEntry[]>([makeEmptyStory()]);
@@ -14,6 +16,14 @@ function App() {
   const [errors, setErrors] = useState<Record<string, Partial<Record<keyof StoryEntry, string>>>>({});
   const [history, setHistory] = useState<SavedUpdate[]>(() => loadSavedUpdates());
   const [currentUpdateId, setCurrentUpdateId] = useState<string | null>(null);
+  const [outputSettings, setOutputSettings] = useState<OutputSettings>(() => loadOutputSettings());
+
+  function handleOutputSettingsChange(next: OutputSettings) {
+    setOutputSettings(next);
+    saveOutputSettings(next);
+    // Regenerate output immediately so the preview reflects the new settings
+    if (htmlOutput) setHtmlOutput(formatOutputHTML(stories, next));
+  }
 
   // Save-as-new modal
   const [saveNamePrompt, setSaveNamePrompt] = useState(false);
@@ -83,7 +93,7 @@ function App() {
 
   function handleGenerate() {
     if (!validate()) return;
-    setHtmlOutput(formatOutputHTML(stories));
+    setHtmlOutput(formatOutputHTML(stories, outputSettings));
   }
 
   // ── Silent save (no changelog, no modal) ────────────────────────────
@@ -146,20 +156,24 @@ function App() {
 
   // ── Load / delete ────────────────────────────────────────────────────
   function handleLoad(update: SavedUpdate) {
-    const loaded = update.stories.map((s) => ({ ...s }));
+    // Always resolve the latest version from storage to pick up any renames
+    const fresh = loadSavedUpdates().find((u) => u.id === update.id) ?? update;
+    const loaded = fresh.stories.map((s) => ({ ...s }));
     setStories(loaded);
-    setCurrentUpdateId(update.id);
-    setSaveName(update.name);
-    setHtmlOutput(formatOutputHTML(loaded));
+    setCurrentUpdateId(fresh.id);
+    setSaveName(fresh.name);
+    setHtmlOutput(formatOutputHTML(loaded, outputSettings));
     setErrors({});
   }
 
   function handleLoadSnapshot(parentUpdate: SavedUpdate, snapshotStories: StoryEntry[]) {
+    // Resolve fresh parent so the name reflects any renames made after the snapshot was captured
+    const freshParent = loadSavedUpdates().find((u) => u.id === parentUpdate.id) ?? parentUpdate;
     const loaded = snapshotStories.map((s) => ({ ...s }));
     setStories(loaded);
-    setCurrentUpdateId(parentUpdate.id);
-    setSaveName(parentUpdate.name);
-    setHtmlOutput(formatOutputHTML(loaded));
+    setCurrentUpdateId(freshParent.id);
+    setSaveName(freshParent.name);
+    setHtmlOutput(formatOutputHTML(loaded, outputSettings));
     setErrors({});
   }
 
@@ -167,6 +181,12 @@ function App() {
     deleteUpdate(id);
     setHistory(loadSavedUpdates());
     if (currentUpdateId === id) { setCurrentUpdateId(null); setSaveName(''); }
+  }
+
+  function handleRename(id: string, newName: string) {
+    renameUpdate(id, newName);
+    setHistory(loadSavedUpdates());
+    if (currentUpdateId === id) setSaveName(newName);
   }
 
   // ── Delete confirmation ──────────────────────────────────────────────
@@ -222,7 +242,7 @@ function App() {
   const isEditing = currentUpdateId !== null;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50 py-10 px-4">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50 py-6 sm:py-10 px-3 sm:px-4">
       <div className="max-w-3xl mx-auto">
 
         {/* Header */}
@@ -230,7 +250,7 @@ function App() {
           <div className="inline-flex items-center gap-2 bg-indigo-600 text-white px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest mb-4">
             <Zap className="w-3.5 h-3.5" /> Trackwise
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Daily Status Update</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight">Daily Status Update</h1>
           <p className="text-gray-500 mt-1 text-sm">Fill in your stories and generate a Teams-ready YTB update.</p>
           <div className="mt-2">
             <VersionInfo />
@@ -408,6 +428,7 @@ function App() {
           onLoad={handleLoad}
           onLoadSnapshot={handleLoadSnapshot}
           onDelete={requestDelete}
+          onRename={handleRename}
           onExport={handleExport}
           onImport={openImport}
         />
@@ -425,7 +446,7 @@ function App() {
         {/* Story cards */}
         <div className="flex items-center justify-between mb-3 px-1">
           <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-            {stories.length} {stories.length === 1 ? 'Story' : 'Stories'}
+            {stories.length} {stories.length === 1 ? 'Item' : 'Items'}
           </span>
           {stories.length > 1 && (
             <button
@@ -458,16 +479,17 @@ function App() {
           onClick={addStory}
           className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-indigo-200 text-indigo-500 text-sm font-semibold hover:border-indigo-400 hover:bg-indigo-50 transition-colors mb-6"
         >
-          <Plus className="w-4 h-4" /> Add Story
+          <Plus className="w-4 h-4" /> Add Item
         </button>
 
         {/* Action bar */}
         <div className="flex flex-wrap gap-3 mb-6">
           <button
             onClick={handleGenerate}
-            className="flex items-center gap-2 bg-indigo-600 text-white text-sm font-semibold px-5 py-2.5 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+            className="flex items-center gap-2 bg-indigo-600 text-white text-sm font-semibold px-4 sm:px-5 py-2.5 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
           >
-            <Zap className="w-4 h-4" /> Generate Output
+            <Zap className="w-4 h-4" />
+            <span>Generate Output</span>
           </button>
 
           {/* Save — silent sync when editing, opens name modal when new */}
@@ -486,9 +508,10 @@ function App() {
           {isEditing && (
             <button
               onClick={openCheckpointPrompt}
-              className="flex items-center gap-2 bg-white border border-gray-200 text-gray-700 text-sm font-semibold px-5 py-2.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
+              className="flex items-center gap-2 bg-white border border-gray-200 text-gray-700 text-sm font-semibold px-4 sm:px-5 py-2.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
             >
-              <Bookmark className="w-4 h-4 text-indigo-400" /> Checkpoint
+              <Bookmark className="w-4 h-4 text-indigo-400" />
+              <span className="hidden sm:inline">Checkpoint</span>
             </button>
           )}
 
@@ -496,21 +519,29 @@ function App() {
           {isEditing && (
             <button
               onClick={openSaveAsNewPrompt}
-              className="flex items-center gap-2 bg-white border border-gray-200 text-gray-700 text-sm font-semibold px-5 py-2.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
+              className="flex items-center gap-2 bg-white border border-gray-200 text-gray-700 text-sm font-semibold px-4 sm:px-5 py-2.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
             >
-              <FilePlus className="w-4 h-4" /> Save as New
+              <FilePlus className="w-4 h-4" />
+              <span className="hidden sm:inline">Save as New</span>
             </button>
           )}
 
           <button
             onClick={handleClear}
-            className="flex items-center gap-2 bg-white border border-gray-200 text-gray-500 text-sm font-semibold px-5 py-2.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm ml-auto"
+            className="flex items-center gap-2 bg-white border border-gray-200 text-gray-500 text-sm font-semibold px-4 sm:px-5 py-2.5 rounded-lg hover:bg-gray-50 transition-colors shadow-sm ml-auto"
           >
-            <RefreshCw className="w-4 h-4" /> Clear
+            <RefreshCw className="w-4 h-4" />
+            <span className="hidden sm:inline">Clear</span>
           </button>
         </div>
 
         {/* Output */}
+        <OutputSettingsPanel
+          settings={outputSettings}
+          onChange={handleOutputSettingsChange}
+          filteredCount={stories.filter((s) => !outputSettings.excludeStatuses.includes(s.status ?? 'not-started')).length}
+          totalCount={stories.length}
+        />
         <OutputPanel htmlOutput={htmlOutput} />
 
         <p className="text-center text-xs text-gray-400 mt-6">Saved updates are stored locally in your browser.</p>

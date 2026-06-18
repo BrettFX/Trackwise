@@ -1,11 +1,21 @@
+export type TaskType = 'task' | 'story' | 'spike';
+export type StoryStatus = 'not-started' | 'in-progress' | 'done' | 'blocked';
+
+export interface OutputSettings {
+  showStatus: boolean;
+  excludeStatuses: StoryStatus[];
+}
+
 export interface StoryEntry {
   id: string;
+  taskType: TaskType;
   title: string;
   ticketNumber: string;
   jiraUrl: string;
   yesterday: string;
   today: string;
   blockers: string;
+  status: StoryStatus;
 }
 
 export interface UpdateSnapshot {

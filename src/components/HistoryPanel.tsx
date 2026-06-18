@@ -1,12 +1,15 @@
-import { useState } from 'react';
-import { Trash2, RotateCcw, ChevronDown, ChevronUp, Clock, History, Download, Upload } from 'lucide-react';
-import type { SavedUpdate, StoryEntry } from '../types';
+import { useState, useRef } from 'react';
+import { Trash2, RotateCcw, ChevronDown, ChevronUp, Clock, History, Download, Upload, Pencil, Check, X } from 'lucide-react';
+import type { SavedUpdate, StoryEntry, StoryStatus, TaskType } from '../types';
+import { statusDotClass } from './StoryCard';
+import { TASK_TYPE_LABELS } from '../utils';
 
 interface HistoryPanelProps {
   history: SavedUpdate[];
   onLoad: (update: SavedUpdate) => void;
   onLoadSnapshot: (parentUpdate: SavedUpdate, snapshotStories: StoryEntry[]) => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, newName: string) => void;
   onExport: () => void;
   onImport: () => void;
 }
@@ -17,80 +20,151 @@ function formatDate(iso: string) {
   });
 }
 
+const STATUS_LABELS: Record<StoryStatus, string> = {
+  'not-started': 'Not Started',
+  'in-progress': 'In Progress',
+  'done': 'Done',
+  'blocked': 'Blocked',
+};
+
 function StorySnapshotSummary({ stories }: { stories: StoryEntry[] }) {
   return (
     <div className="flex flex-col gap-3">
-      {stories.map((s, idx) => (
-        <div key={s.id ?? idx} className="text-xs text-gray-600 leading-relaxed">
-          <p className="font-semibold text-gray-700 mb-0.5">
-            {s.title || '(untitled)'}
-            {s.ticketNumber && <span className="text-gray-400 font-normal ml-1.5">({s.ticketNumber})</span>}
-          </p>
-          <p><span className="font-medium text-gray-500">Yesterday:</span> {s.yesterday.trim() || 'None'}</p>
-          <p><span className="font-medium text-gray-500">Today:</span> {s.today.trim() || '—'}</p>
-          <p><span className="font-medium text-gray-500">Blockers:</span> {s.blockers.trim() || 'None'}</p>
-        </div>
-      ))}
+      {stories.map((s, idx) => {
+        const status: StoryStatus = s.status ?? 'not-started';
+        const taskType: TaskType = s.taskType ?? 'task';
+        return (
+          <div key={s.id ?? idx} className="text-xs text-gray-600 leading-relaxed">
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <span className={`w-2 h-2 rounded-full shrink-0 ${statusDotClass(status)}`} />
+              <p className="font-semibold text-gray-700">
+                <span className="text-indigo-500 mr-1">{TASK_TYPE_LABELS[taskType]}:</span>
+                {s.title || '(untitled)'}
+                {s.ticketNumber && <span className="text-gray-400 font-normal ml-1.5">({s.ticketNumber})</span>}
+                <span className="text-gray-400 font-normal ml-1.5">[{STATUS_LABELS[status]}]</span>
+              </p>
+            </div>
+            <p className="ml-3.5"><span className="font-medium text-gray-500">Yesterday:</span> {s.yesterday.trim() || 'None'}</p>
+            <p className="ml-3.5"><span className="font-medium text-gray-500">Today:</span> {s.today.trim() || '—'}</p>
+            <p className="ml-3.5"><span className="font-medium text-gray-500">Blockers:</span> {s.blockers.trim() || 'None'}</p>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 function HistoryEntry({
-  update, onLoad, onLoadSnapshot, onDelete,
+  update, onLoad, onLoadSnapshot, onDelete, onRename,
 }: {
   update: SavedUpdate;
   onLoad: (u: SavedUpdate) => void;
   onLoadSnapshot: (parent: SavedUpdate, stories: StoryEntry[]) => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, newName: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const hasChangelog = update.changelog && update.changelog.length > 0;
+
+  function startRename(e: React.MouseEvent) {
+    e.stopPropagation();
+    setRenameValue(update.name);
+    setRenaming(true);
+    setTimeout(() => renameInputRef.current?.select(), 0);
+  }
+
+  function commitRename() {
+    if (renameValue.trim() && renameValue.trim() !== update.name) {
+      onRename(update.id, renameValue.trim());
+    }
+    setRenaming(false);
+  }
+
+  function cancelRename() {
+    setRenaming(false);
+  }
 
   return (
     <li className="border-b border-gray-100 last:border-b-0">
-      {/* Main row — clicking name/chevron toggles preview */}
-      <div className="flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors">
-        <button
-          className="flex items-center gap-2 min-w-0 flex-1 text-left"
-          onClick={() => setExpanded((o) => !o)}
-        >
-          {expanded
-            ? <ChevronUp className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-            : <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
-          <div className="flex flex-col gap-0.5 min-w-0">
-            <span className="text-sm font-medium text-gray-800 truncate">{update.name}</span>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs text-gray-400">
-                {formatDate(update.createdAt)} · {update.stories.length} {update.stories.length === 1 ? 'story' : 'stories'}
-              </span>
-              {hasChangelog && (
-                <span className="text-xs text-indigo-400 font-medium">
-                  {update.changelog.length} checkpoint{update.changelog.length !== 1 ? 's' : ''}
-                </span>
-              )}
-            </div>
+      {/* Main row */}
+      <div className="flex items-center justify-between px-4 sm:px-5 py-3 hover:bg-gray-50 transition-colors">
+        {renaming ? (
+          /* Inline rename mode */
+          <div className="flex items-center gap-2 flex-1 min-w-0 mr-2" onClick={(e) => e.stopPropagation()}>
+            <input
+              ref={renameInputRef}
+              autoFocus
+              type="text"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') cancelRename(); }}
+              className="flex-1 min-w-0 border border-indigo-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            />
+            <button onClick={commitRename} className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors" title="Save">
+              <Check className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={cancelRename} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 transition-colors" title="Cancel">
+              <X className="w-3.5 h-3.5" />
+            </button>
           </div>
-        </button>
-        <div className="flex items-center gap-1 ml-4 shrink-0">
+        ) : (
           <button
-            onClick={() => onLoad(update)}
-            className="flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition-colors"
+            className="flex items-center gap-2 min-w-0 flex-1 text-left"
+            onClick={() => setExpanded((o) => !o)}
           >
-            <RotateCcw className="w-3.5 h-3.5" /> Load
+            {expanded
+              ? <ChevronUp className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+              : <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
+            <div className="flex flex-col gap-0.5 min-w-0">
+              <span className="text-sm font-medium text-gray-800 truncate">{update.name}</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-gray-400">
+                  {formatDate(update.createdAt)} · {update.stories.length} {update.stories.length === 1 ? 'item' : 'items'}
+                </span>
+                {hasChangelog && (
+                  <span className="text-xs text-indigo-400 font-medium">
+                    {update.changelog.length} checkpoint{update.changelog.length !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+            </div>
           </button>
-          <button
-            onClick={() => onDelete(update.id)}
-            className="flex items-center gap-1 text-xs font-semibold text-red-400 hover:text-red-600 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        )}
+
+        {!renaming && (
+          <div className="flex items-center gap-1 ml-2 shrink-0">
+            <button
+              onClick={startRename}
+              title="Rename"
+              className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => onLoad(update)}
+              className="flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2 py-1.5 rounded-lg transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Load</span>
+            </button>
+            <button
+              onClick={() => onDelete(update.id)}
+              className="p-1.5 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+              title="Delete"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Expanded panel: current stories preview + optional changelog */}
       {expanded && (
-        <div className="bg-slate-50 border-t border-gray-100 px-5 py-4">
+        <div className="bg-slate-50 border-t border-gray-100 px-4 sm:px-5 py-4">
 
           {/* Current stories preview */}
           <div className="bg-white rounded-lg border border-gray-200 p-3 mb-3">
@@ -153,7 +227,7 @@ function HistoryEntry({
   );
 }
 
-export default function HistoryPanel({ history, onLoad, onLoadSnapshot, onDelete, onExport, onImport }: HistoryPanelProps) {
+export default function HistoryPanel({ history, onLoad, onLoadSnapshot, onDelete, onRename, onExport, onImport }: HistoryPanelProps) {
   const [open, setOpen] = useState(true);
 
   return (
@@ -179,7 +253,8 @@ export default function HistoryPanel({ history, onLoad, onLoadSnapshot, onDelete
               title="Export all saved updates to JSON"
               className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition-colors"
             >
-              <Download className="w-3.5 h-3.5" /> Export
+                        <Download className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Export</span>
             </button>
           )}
           <button
@@ -187,7 +262,8 @@ export default function HistoryPanel({ history, onLoad, onLoadSnapshot, onDelete
             title="Import saved updates from JSON"
             className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition-colors"
           >
-            <Upload className="w-3.5 h-3.5" /> Import
+            <Upload className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Import</span>
           </button>
         </div>
       </div>
@@ -207,6 +283,7 @@ export default function HistoryPanel({ history, onLoad, onLoadSnapshot, onDelete
               onLoad={onLoad}
               onLoadSnapshot={onLoadSnapshot}
               onDelete={onDelete}
+              onRename={onRename}
             />
           ))}
         </ul>
