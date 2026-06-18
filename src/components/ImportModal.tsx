@@ -6,10 +6,11 @@ import {
 import type { ImportMode, ImportPreview } from '../utils';
 import { previewImport, importUpdates, loadSavedUpdates } from '../utils';
 import type { SavedUpdate } from '../types';
+import { isFileSystemAccessSupported } from '../fileHandleStore';
 
 interface ImportModalProps {
   onClose: () => void;
-  onImported: (updates: SavedUpdate[]) => void;
+  onImported: (updates: SavedUpdate[], handle?: FileSystemFileHandle) => void;
 }
 
 type Step = 'input' | 'preview' | 'done';
@@ -28,6 +29,7 @@ export default function ImportModal({ onClose, onImported }: ImportModalProps) {
   const [parseError, setParseError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileHandleRef = useRef<FileSystemFileHandle | undefined>(undefined);
 
   const hasExisting = loadSavedUpdates().length > 0;
 
@@ -60,12 +62,45 @@ export default function ImportModal({ onClose, onImported }: ImportModalProps) {
     reader.readAsText(file);
   }
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
+    // Try to get a FileSystemFileHandle from the drag item (Chrome/Edge)
+    const item = e.dataTransfer.items[0];
+    if (item && isFileSystemAccessSupported()) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const handle = await (item as any).getAsFileSystemHandle?.();
+        if (handle && handle.kind === 'file') {
+          fileHandleRef.current = handle as FileSystemFileHandle;
+          handleFileSelect(await (handle as FileSystemFileHandle).getFile());
+          return;
+        }
+      } catch { /* fall through to regular file read */ }
+    }
     const file = e.dataTransfer.files[0];
     if (file) handleFileSelect(file);
   }, []);
+
+  /** Open the file picker — uses File System Access API when available so we
+   *  can write changes back to the same file later. Falls back to a hidden
+   *  <input type="file"> on unsupported browsers. */
+  async function handleBrowseClick() {
+    if (isFileSystemAccessSupported()) {
+      try {
+        const [handle] = await window.showOpenFilePicker({
+          types: [{ description: 'JSON files', accept: { 'application/json': ['.json'] } }],
+          multiple: false,
+        });
+        fileHandleRef.current = handle;
+        handleFileSelect(await handle.getFile());
+        return;
+      } catch {
+        // User cancelled or API unavailable — fall through to input
+      }
+    }
+    fileInputRef.current?.click();
+  }
 
   function handleProceed() {
     if (!json.trim() || !preview) return;
@@ -79,7 +114,7 @@ export default function ImportModal({ onClose, onImported }: ImportModalProps) {
 
   function doImport(selectedMode: ImportMode) {
     const r = importUpdates(json, selectedMode);
-    onImported(r.importedUpdates); // pass imported entries to parent
+    onImported(r.importedUpdates, fileHandleRef.current);
     setResult({ imported: r.imported, duplicates: r.duplicates });
     setStep('done');
   }
@@ -113,7 +148,7 @@ export default function ImportModal({ onClose, onImported }: ImportModalProps) {
                 onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
                 onDragLeave={() => setDragging(false)}
                 onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
+                onClick={handleBrowseClick}
                 className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed cursor-pointer px-6 py-8 transition-colors
                   ${dragging ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200 hover:border-indigo-300 hover:bg-gray-50'}`}
               >
@@ -131,7 +166,7 @@ export default function ImportModal({ onClose, onImported }: ImportModalProps) {
                   type="file"
                   accept="application/json,.json"
                   className="hidden"
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileSelect(f); e.target.value = ''; }}
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) { fileHandleRef.current = undefined; handleFileSelect(f); } e.target.value = ''; }}
                 />
               </div>
 

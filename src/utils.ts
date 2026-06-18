@@ -110,14 +110,15 @@ export function saveCheckpoint(
 
   const existing = all[idx];
 
-  // Diff guard: compare against last checkpoint, or current stored stories if none.
-  const reference =
-    existing.changelog.length > 0
-      ? existing.changelog[existing.changelog.length - 1].stories
-      : existing.stories;
-
-  if (contentFingerprint(stories) === contentFingerprint(reference)) {
-    return { saved: false, update: existing };
+  // Diff guard: compare against the last checkpoint snapshot only.
+  // When no checkpoints exist yet, always allow the first one — comparing
+  // against existing.stories would always match because silentSave keeps it
+  // in sync with the current editor state.
+  if (existing.changelog.length > 0) {
+    const lastSnapshot = existing.changelog[existing.changelog.length - 1];
+    if (contentFingerprint(stories) === contentFingerprint(lastSnapshot.stories)) {
+      return { saved: false, update: existing };
+    }
   }
 
   const snapshot: UpdateSnapshot = {

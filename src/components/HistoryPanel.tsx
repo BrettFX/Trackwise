@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Trash2, RotateCcw, ChevronDown, ChevronUp, Clock, History, Download, Upload, Pencil, Check, X } from 'lucide-react';
+import { Trash2, RotateCcw, ChevronDown, ChevronUp, Clock, History, Download, Upload, Pencil, Check, X, Link2 } from 'lucide-react';
 import type { SavedUpdate, StoryEntry, StoryStatus, TaskType } from '../types';
 import { statusDotClass } from './StoryCard';
 import { TASK_TYPE_LABELS } from '../utils';
@@ -13,6 +13,7 @@ interface HistoryPanelProps {
   onExportEntry: (id: string) => void;
   onExport: () => void;
   onImport: () => void;
+  linkedFileNames?: Record<string, string>;
 }
 
 function formatDate(iso: string) {
@@ -56,7 +57,7 @@ function StorySnapshotSummary({ stories }: { stories: StoryEntry[] }) {
 }
 
 function HistoryEntry({
-  update, onLoad, onLoadSnapshot, onDelete, onRename, onExportEntry,
+  update, onLoad, onLoadSnapshot, onDelete, onRename, onExportEntry, linkedFileName,
 }: {
   update: SavedUpdate;
   onLoad: (u: SavedUpdate) => void;
@@ -64,6 +65,7 @@ function HistoryEntry({
   onDelete: (id: string) => void;
   onRename: (id: string, newName: string) => void;
   onExportEntry: (id: string) => void;
+  linkedFileName?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
@@ -130,6 +132,15 @@ function HistoryEntry({
                 {hasChangelog && (
                   <span className="text-xs text-indigo-400 font-medium">
                     {update.changelog.length} checkpoint{update.changelog.length !== 1 ? 's' : ''}
+                  </span>
+                )}
+                {linkedFileName && (
+                  <span
+                    className="inline-flex items-center gap-1 text-xs text-emerald-600 font-medium"
+                    title={`Changes save back to: ${linkedFileName}`}
+                  >
+                    <Link2 className="w-3 h-3 shrink-0" />
+                    <span className="truncate max-w-[110px]">{linkedFileName}</span>
                   </span>
                 )}
               </div>
@@ -236,7 +247,7 @@ function HistoryEntry({
   );
 }
 
-export default function HistoryPanel({ history, onLoad, onLoadSnapshot, onDelete, onRename, onExportEntry, onExport, onImport }: HistoryPanelProps) {
+export default function HistoryPanel({ history, onLoad, onLoadSnapshot, onDelete, onRename, onExportEntry, onExport, onImport, linkedFileNames }: HistoryPanelProps) {
   const [open, setOpen] = useState(true);
 
   return (
@@ -294,6 +305,7 @@ export default function HistoryPanel({ history, onLoad, onLoadSnapshot, onDelete
               onDelete={onDelete}
               onRename={onRename}
               onExportEntry={onExportEntry}
+              linkedFileName={linkedFileNames?.[update.id]}
             />
           ))}
         </ul>

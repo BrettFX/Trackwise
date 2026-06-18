@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Plus, Zap, Save, RefreshCw, Bookmark, FilePlus, Check, ChevronsUpDown, Trash2, TriangleAlert } from 'lucide-react';
 import StoryCard from './components/StoryCard';
 import OutputPanel from './components/OutputPanel';
@@ -8,6 +8,7 @@ import VersionInfo from './components/VersionInfo';
 import OutputSettingsPanel from './components/OutputSettingsPanel';
 import type { StoryEntry, SavedUpdate } from './types';
 import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, renameUpdate, exportUpdates, exportSingleUpdate, hasUnsavedChanges, loadOutputSettings, saveOutputSettings } from './utils';
+import { storeFileHandle, getHandleForEntry, getAllLinkedFiles, writeEntriesToHandle, removeHandlesForEntries } from './fileHandleStore';
 import type { OutputSettings } from './types';
 
 function App() {
@@ -17,6 +18,33 @@ function App() {
   const [history, setHistory] = useState<SavedUpdate[]>(() => loadSavedUpdates());
   const [currentUpdateId, setCurrentUpdateId] = useState<string | null>(null);
   const [outputSettings, setOutputSettings] = useState<OutputSettings>(() => loadOutputSettings());
+
+  // ── Linked file handles (File System Access API) ─────────────────────
+  // Maps entry ID → file name for entries that were imported from a file.
+  const [linkedFileNames, setLinkedFileNames] = useState<Record<string, string>>({});
+
+  async function refreshLinkedFileNames() {
+    try {
+      const records = await getAllLinkedFiles();
+      const map: Record<string, string> = {};
+      for (const rec of records) {
+        for (const id of rec.entryIds) map[id] = rec.fileName;
+      }
+      setLinkedFileNames(map);
+    } catch { /* IndexedDB unavailable */ }
+  }
+
+  useEffect(() => { refreshLinkedFileNames(); }, []);
+
+  /** Write the current storage snapshot back to the linked file for this entry.
+   *  Must be called from a user-gesture handler so permission prompts are allowed. */
+  async function syncLinkedFile(entryId: string) {
+    try {
+      const record = await getHandleForEntry(entryId);
+      if (!record) return;
+      await writeEntriesToHandle(record, loadSavedUpdates());
+    } catch { /* silent — never disrupt the save flow */ }
+  }
 
   function handleOutputSettingsChange(next: OutputSettings) {
     setOutputSettings(next);
@@ -97,7 +125,7 @@ function App() {
   }
 
   // ── Silent save (no changelog, no modal) ────────────────────────────
-  function handleSilentSave() {
+  async function handleSilentSave() {
     if (!currentUpdateId) {
       // No entry loaded yet — open the name modal to save as new
       openSaveAsNewPrompt();
@@ -108,6 +136,7 @@ function App() {
       setHistory(loadSavedUpdates());
       setSilentSavedFeedback(true);
       setTimeout(() => setSilentSavedFeedback(false), 2000);
+      await syncLinkedFile(currentUpdateId);
     }
   }
 
@@ -143,6 +172,7 @@ function App() {
     const result = saveCheckpoint(currentUpdateId, checkpointNote, stories);
     setHistory(loadSavedUpdates());
     if (result.saved) {
+      syncLinkedFile(currentUpdateId);
       setCheckpointStatus('saved');
       setTimeout(() => {
         setCheckpointPrompt(false);
@@ -181,6 +211,7 @@ function App() {
     deleteUpdate(id);
     setHistory(loadSavedUpdates());
     if (currentUpdateId === id) { setCurrentUpdateId(null); setSaveName(''); }
+    removeHandlesForEntries([id]).then(() => refreshLinkedFileNames());
   }
 
   function handleRename(id: string, newName: string) {
@@ -222,9 +253,13 @@ function App() {
     }
   }
 
-  function handleImportDone(importedUpdates: import('./types').SavedUpdate[]) {
+  function handleImportDone(importedUpdates: import('./types').SavedUpdate[], fileHandle?: FileSystemFileHandle) {
     setHistory(loadSavedUpdates());
     setImportOpen(false);
+    if (fileHandle && importedUpdates.length > 0) {
+      const entryIds = importedUpdates.map((u) => u.id);
+      storeFileHandle(fileHandle, entryIds).then(() => refreshLinkedFileNames());
+    }
     // Auto-load the most recently created imported update
     if (importedUpdates.length > 0) {
       const newest = importedUpdates.reduce((a, b) =>
@@ -436,6 +471,7 @@ function App() {
           onExportEntry={handleExportEntry}
           onExport={handleExport}
           onImport={openImport}
+          linkedFileNames={linkedFileNames}
         />
 
         {/* Current update badge */}
