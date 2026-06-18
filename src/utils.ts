@@ -171,6 +171,27 @@ export function exportUpdates(): void {
   URL.revokeObjectURL(url);
 }
 
+/** Trigger a JSON file download containing a single saved update (always uses the
+ *  latest version from storage so renames are reflected in the downloaded file). */
+export function exportSingleUpdate(id: string): void {
+  const update = loadSavedUpdates().find((u) => u.id === id);
+  if (!update) return;
+  const payload: ExportPayload = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    updates: [update],
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const date = new Date().toISOString().slice(0, 10);
+  const slug = update.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  a.href = url;
+  a.download = `trackwise-${slug}-${date}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export type ImportMode = 'merge' | 'replace';
 
 export interface ImportResult {

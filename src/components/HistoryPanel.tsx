@@ -10,6 +10,7 @@ interface HistoryPanelProps {
   onLoadSnapshot: (parentUpdate: SavedUpdate, snapshotStories: StoryEntry[]) => void;
   onDelete: (id: string) => void;
   onRename: (id: string, newName: string) => void;
+  onExportEntry: (id: string) => void;
   onExport: () => void;
   onImport: () => void;
 }
@@ -55,13 +56,14 @@ function StorySnapshotSummary({ stories }: { stories: StoryEntry[] }) {
 }
 
 function HistoryEntry({
-  update, onLoad, onLoadSnapshot, onDelete, onRename,
+  update, onLoad, onLoadSnapshot, onDelete, onRename, onExportEntry,
 }: {
   update: SavedUpdate;
   onLoad: (u: SavedUpdate) => void;
   onLoadSnapshot: (parent: SavedUpdate, stories: StoryEntry[]) => void;
   onDelete: (id: string) => void;
   onRename: (id: string, newName: string) => void;
+  onExportEntry: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
@@ -143,6 +145,13 @@ function HistoryEntry({
               className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
             >
               <Pencil className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => onExportEntry(update.id)}
+              title="Download this entry as JSON"
+              className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+            >
+              <Download className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={() => onLoad(update)}
@@ -227,7 +236,7 @@ function HistoryEntry({
   );
 }
 
-export default function HistoryPanel({ history, onLoad, onLoadSnapshot, onDelete, onRename, onExport, onImport }: HistoryPanelProps) {
+export default function HistoryPanel({ history, onLoad, onLoadSnapshot, onDelete, onRename, onExportEntry, onExport, onImport }: HistoryPanelProps) {
   const [open, setOpen] = useState(true);
 
   return (
@@ -284,6 +293,7 @@ export default function HistoryPanel({ history, onLoad, onLoadSnapshot, onDelete
               onLoadSnapshot={onLoadSnapshot}
               onDelete={onDelete}
               onRename={onRename}
+              onExportEntry={onExportEntry}
             />
           ))}
         </ul>

@@ -7,7 +7,7 @@ import ImportModal from './components/ImportModal';
 import VersionInfo from './components/VersionInfo';
 import OutputSettingsPanel from './components/OutputSettingsPanel';
 import type { StoryEntry, SavedUpdate } from './types';
-import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, renameUpdate, exportUpdates, hasUnsavedChanges, loadOutputSettings, saveOutputSettings } from './utils';
+import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, renameUpdate, exportUpdates, exportSingleUpdate, hasUnsavedChanges, loadOutputSettings, saveOutputSettings } from './utils';
 import type { OutputSettings } from './types';
 
 function App() {
@@ -205,6 +205,10 @@ function App() {
   // ── Export / Import ──────────────────────────────────────────────────
   function handleExport() {
     exportUpdates();
+  }
+
+  function handleExportEntry(id: string) {
+    exportSingleUpdate(id);
   }
 
   const [importOpen, setImportOpen] = useState(false);
@@ -429,6 +433,7 @@ function App() {
           onLoadSnapshot={handleLoadSnapshot}
           onDelete={requestDelete}
           onRename={handleRename}
+          onExportEntry={handleExportEntry}
           onExport={handleExport}
           onImport={openImport}
         />
