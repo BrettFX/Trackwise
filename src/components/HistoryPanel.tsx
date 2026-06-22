@@ -207,7 +207,12 @@ function HistoryEntry({
                 <div className="relative">
                   <div className="absolute left-[7px] top-2 bottom-2 w-px bg-indigo-100" />
                   <div className="flex flex-col gap-4">
-                    {[...update.changelog].map((snap, idx) => (
+                    {/* Current version cap — shown first since list is newest → oldest */}
+                    <div className="flex gap-3 items-center">
+                      <div className="w-3.5 h-3.5 rounded-full bg-indigo-500 border-2 border-indigo-500 shrink-0 z-10" />
+                      <span className="text-xs font-semibold text-indigo-600">Current version</span>
+                    </div>
+                    {[...update.changelog].reverse().map((snap, idx) => (
                       <div key={idx} className="flex gap-3 items-start">
                         <div className="w-3.5 h-3.5 rounded-full bg-white border-2 border-indigo-300 mt-0.5 shrink-0 z-10" />
                         <div className="flex-1 min-w-0">
@@ -231,11 +236,6 @@ function HistoryEntry({
                         </div>
                       </div>
                     ))}
-                    {/* Current version cap */}
-                    <div className="flex gap-3 items-center">
-                      <div className="w-3.5 h-3.5 rounded-full bg-indigo-500 border-2 border-indigo-500 shrink-0 z-10" />
-                      <span className="text-xs font-semibold text-indigo-600">Current version</span>
-                    </div>
                   </div>
                 </div>
               )}

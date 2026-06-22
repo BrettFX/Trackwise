@@ -32,6 +32,7 @@ const TASK_TYPE_OPTIONS: { value: TaskType; label: string }[] = [
   { value: 'task',  label: 'Task' },
   { value: 'story', label: 'Story' },
   { value: 'spike', label: 'Spike' },
+  { value: 'bug',   label: 'Bug' },
 ];
 
 export function statusDotClass(status: StoryStatus): string {

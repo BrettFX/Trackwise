@@ -352,6 +352,7 @@ export const TASK_TYPE_LABELS: Record<TaskType, string> = {
   task: 'Task',
   story: 'Story',
   spike: 'Spike',
+  bug: 'Bug',
 };
 
 export function formatOutputHTML(stories: StoryEntry[], settings: OutputSettings = DEFAULT_OUTPUT_SETTINGS): string {

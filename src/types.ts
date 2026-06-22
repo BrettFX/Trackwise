@@ -1,4 +1,4 @@
-export type TaskType = 'task' | 'story' | 'spike';
+export type TaskType = 'task' | 'story' | 'spike' | 'bug';
 export type StoryStatus = 'not-started' | 'in-progress' | 'done' | 'blocked';
 
 export interface OutputSettings {

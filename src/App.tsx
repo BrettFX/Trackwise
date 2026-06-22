@@ -6,6 +6,7 @@ import HistoryPanel from './components/HistoryPanel';
 import ImportModal from './components/ImportModal';
 import VersionInfo from './components/VersionInfo';
 import OutputSettingsPanel from './components/OutputSettingsPanel';
+import NavPanel from './components/NavPanel';
 import type { StoryEntry, SavedUpdate } from './types';
 import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, renameUpdate, exportUpdates, exportSingleUpdate, hasUnsavedChanges, loadOutputSettings, saveOutputSettings } from './utils';
 import { storeFileHandle, getHandleForEntry, getAllLinkedFiles, writeEntriesToHandle, removeHandlesForEntries } from './fileHandleStore';
@@ -282,6 +283,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50 py-6 sm:py-10 px-3 sm:px-4">
+      <NavPanel />
       <div className="max-w-3xl mx-auto">
 
         {/* Header */}
@@ -462,6 +464,7 @@ function App() {
         )}
 
         {/* History */}
+        <div id="section-history">
         <HistoryPanel
           history={history}
           onLoad={handleLoad}
@@ -473,8 +476,10 @@ function App() {
           onImport={openImport}
           linkedFileNames={linkedFileNames}
         />
+        </div>
 
         {/* Current update badge */}
+        <div id="section-tasks">
         {isEditing && (
           <div className="flex items-center gap-2 mb-4 px-1">
             <span className="text-xs text-gray-500">Editing:</span>
@@ -577,6 +582,8 @@ function App() {
         </div>
 
         {/* Output */}
+        </div>{/* end section-tasks */}
+        <div id="section-output">
         <OutputSettingsPanel
           settings={outputSettings}
           onChange={handleOutputSettingsChange}
@@ -584,6 +591,7 @@ function App() {
           totalCount={stories.length}
         />
         <OutputPanel htmlOutput={htmlOutput} />
+        </div>{/* end section-output */}
 
         <p className="text-center text-xs text-gray-400 mt-6">Saved updates are stored locally in your browser.</p>
       </div>
