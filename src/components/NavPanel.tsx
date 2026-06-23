@@ -57,7 +57,7 @@ export default function NavPanel() {
   return (
     <nav
       aria-label="Page sections"
-      className="fixed left-4 top-1/2 -translate-y-1/2 z-40 hidden lg:flex flex-col gap-2"
+      className="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-40 flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white/95 p-2 shadow-lg shadow-slate-200/70 backdrop-blur-sm lg:inset-x-auto lg:left-4 lg:top-1/2 lg:bottom-auto lg:-translate-y-1/2 lg:flex-col lg:items-stretch lg:justify-start lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none"
     >
       {NAV_ITEMS.map((item) => {
         const active = activeId === item.id;
@@ -66,14 +66,14 @@ export default function NavPanel() {
             key={item.id}
             onClick={() => scrollTo(item.id)}
             title={item.label}
-            className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all border
+            className={`flex min-h-11 flex-1 items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all border lg:min-h-0 lg:flex-none lg:justify-start
               ${active
                 ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-200'
                 : 'bg-white/90 backdrop-blur-sm text-gray-500 border-gray-200 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 shadow-sm'
               }`}
           >
             {item.icon}
-            <span className="hidden xl:inline">{item.label}</span>
+            <span className="sr-only sm:not-sr-only lg:sr-only xl:not-sr-only">{item.label}</span>
           </button>
         );
       })}

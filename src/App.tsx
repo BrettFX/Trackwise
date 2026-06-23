@@ -282,7 +282,7 @@ function App() {
   const isEditing = currentUpdateId !== null;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50 py-6 sm:py-10 px-3 sm:px-4">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50 px-3 pt-6 pb-24 sm:px-4 sm:pt-10 sm:pb-28 lg:py-10">
       <NavPanel />
       <div className="max-w-3xl mx-auto">
 
