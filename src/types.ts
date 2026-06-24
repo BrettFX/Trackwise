@@ -18,6 +18,16 @@ export interface StoryEntry {
   status: StoryStatus;
   createdAt: string;
   updatedAt: string;
+  carryOver?: CarryOverInfo;
+}
+
+export interface CarryOverInfo {
+  sourceUpdateId: string;
+  sourceUpdateName: string;
+  sourceStoryId: string;
+  rootStoryId: string;
+  carriedOverAt: string;
+  generation: number;
 }
 
 export interface UpdateSnapshot {
@@ -40,4 +50,17 @@ export type TaskListSortKey = 'createdAt' | 'updatedAt' | 'status';
 export interface TaskListSettings {
   sortBy: TaskListSortKey;
   filterStatus: StoryStatus | 'all';
+}
+
+export interface TaskLineageEntry {
+  id: string;
+  updateId: string;
+  updateName: string;
+  savedAt: string;
+  title: string;
+  status: StoryStatus;
+  today: string;
+  blockers: string;
+  note?: string;
+  checkpoint: boolean;
 }

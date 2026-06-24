@@ -1,6 +1,7 @@
 
-import { X, GripVertical, ChevronDown, ChevronUp } from 'lucide-react';
-import type { StoryEntry, StoryStatus, TaskType } from '../types';
+import { useState } from 'react';
+import { X, GripVertical, ChevronDown, ChevronUp, History } from 'lucide-react';
+import type { StoryEntry, StoryStatus, TaskLineageEntry, TaskType } from '../types';
 import { TASK_TYPE_LABELS } from '../utils';
 
 interface StoryCardProps {
@@ -12,6 +13,7 @@ interface StoryCardProps {
   errors: Partial<Record<keyof StoryEntry, string>>;
   onChange: (id: string, field: keyof StoryEntry, value: string) => void;
   onRemove: (id: string) => void;
+  lineage?: TaskLineageEntry[];
 }
 
 const STATUS_OPTIONS: { value: StoryStatus; label: string; dot: string }[] = [
@@ -41,13 +43,21 @@ export function statusDotClass(status: StoryStatus): string {
 
 const selectBase = 'w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 focus:bg-white transition-colors appearance-none cursor-pointer';
 
-export default function StoryCard({ story, index, total, collapsed, onToggleCollapse, errors, onChange, onRemove }: StoryCardProps) {
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleString(undefined, {
+    month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+  });
+}
+
+export default function StoryCard({ story, index, total, collapsed, onToggleCollapse, errors, onChange, onRemove, lineage = [] }: StoryCardProps) {
+  const [lineageOpen, setLineageOpen] = useState(false);
   const status: StoryStatus = story.status ?? 'not-started';
   const taskType: TaskType = story.taskType ?? 'task';
   const typeLabel = TASK_TYPE_LABELS[taskType];
   const summaryLabel = story.title.trim() || `${typeLabel} ${index + 1}`;
   const hasErrors = Object.keys(errors).length > 0;
   const activeDot = statusDotClass(status);
+  const hasLineage = story.carryOver || lineage.length > 1;
 
   function extractTicketFromUrl(url: string): string | null {
     const match = url.match(/\/([A-Z]+-\d+)\s*$/i);
@@ -134,6 +144,11 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
           {hasErrors && collapsed && (
             <span className="text-xs text-red-400 font-semibold ml-1 shrink-0">⚠ incomplete</span>
           )}
+          {story.carryOver && (
+            <span className="text-[10px] font-bold uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shrink-0">
+              Carry-over
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {total > 1 && (
@@ -154,6 +169,15 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
       {/* Fields */}
       {!collapsed && (
         <div className="p-4 sm:p-5 flex flex-col gap-4">
+          {story.carryOver && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+              <p className="text-xs text-amber-800">
+                <span className="font-semibold">Carry-over:</span> from {story.carryOver.sourceUpdateName}
+                {story.carryOver.generation > 1 ? ` · generation ${story.carryOver.generation}` : ''}
+              </p>
+            </div>
+          )}
+
           {/* Type + Status row */}
           <div className="grid grid-cols-2 gap-3">
             {/* Task type dropdown */}
@@ -201,6 +225,40 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
           {field('yesterday', 'Yesterday', false, 'What did you work on yesterday?', true)}
           {field('today', 'Today', true, 'What are you working on today?', true)}
           {field('blockers', 'Blockers', false, 'Any blockers? Leave blank for "None"', true)}
+
+          {hasLineage && (
+            <div className="border-t border-gray-100 pt-3">
+              <button
+                onClick={() => setLineageOpen((o) => !o)}
+                className="flex items-center gap-1.5 text-xs font-semibold text-indigo-500 hover:text-indigo-700 transition-colors"
+              >
+                <History className="w-3.5 h-3.5" />
+                {lineageOpen ? 'Hide' : 'View'} task lineage
+                {lineage.length > 0 ? ` (${lineage.length})` : ''}
+                {lineageOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              </button>
+              {lineageOpen && (
+                <div className="mt-3 flex flex-col gap-2">
+                  {lineage.length === 0 && story.carryOver && (
+                    <p className="text-xs text-gray-500">Carried over from {story.carryOver.sourceUpdateName}.</p>
+                  )}
+                  {lineage.map((entry) => (
+                    <div key={entry.id} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                      <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${statusDotClass(entry.status)}`} />
+                        <span className="font-semibold text-gray-700">{entry.updateName}</span>
+                        <span className="text-gray-400">{formatDate(entry.savedAt)}</span>
+                        {entry.checkpoint && <span className="text-indigo-500 font-medium">checkpoint</span>}
+                        {entry.note && <span className="text-indigo-600 italic">"{entry.note}"</span>}
+                      </div>
+                      <p><span className="font-medium text-gray-500">Today:</span> {entry.today.trim() || '—'}</p>
+                      <p><span className="font-medium text-gray-500">Blockers:</span> {entry.blockers.trim() || 'None'}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

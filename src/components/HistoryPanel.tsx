@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Trash2, RotateCcw, ChevronDown, ChevronUp, Clock, History, Download, Upload, Pencil, Check, X, Link2 } from 'lucide-react';
+import { Trash2, RotateCcw, ChevronDown, ChevronUp, Clock, History, Download, Upload, Pencil, Check, X, Link2, CopyPlus } from 'lucide-react';
 import type { SavedUpdate, StoryEntry, StoryStatus, TaskType } from '../types';
 import { statusDotClass } from './StoryCard';
 import { TASK_TYPE_LABELS } from '../utils';
@@ -13,6 +13,7 @@ interface HistoryPanelProps {
   onExportEntry: (id: string) => void;
   onExport: () => void;
   onImport: () => void;
+  onCarryOverStories: (update: SavedUpdate, stories: StoryEntry[]) => void;
   linkedFileNames?: Record<string, string>;
 }
 
@@ -29,26 +30,43 @@ const STATUS_LABELS: Record<StoryStatus, string> = {
   'blocked': 'Blocked',
 };
 
-function StorySnapshotSummary({ stories }: { stories: StoryEntry[] }) {
+function StorySnapshotSummary({
+  stories, selectedIds, onToggleStory,
+}: {
+  stories: StoryEntry[];
+  selectedIds?: Set<string>;
+  onToggleStory?: (id: string) => void;
+}) {
   return (
     <div className="flex flex-col gap-3">
       {stories.map((s, idx) => {
         const status: StoryStatus = s.status ?? 'not-started';
         const taskType: TaskType = s.taskType ?? 'task';
+        const selectable = selectedIds && onToggleStory;
         return (
           <div key={s.id ?? idx} className="text-xs text-gray-600 leading-relaxed">
             <div className="flex items-center gap-1.5 mb-0.5">
+              {selectable && (
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(s.id)}
+                  onChange={() => onToggleStory(s.id)}
+                  className="rounded accent-indigo-600 w-3.5 h-3.5 shrink-0"
+                  aria-label={`Select ${s.title || 'untitled task'} to carry over`}
+                />
+              )}
               <span className={`w-2 h-2 rounded-full shrink-0 ${statusDotClass(status)}`} />
               <p className="font-semibold text-gray-700">
                 <span className="text-indigo-500 mr-1">{TASK_TYPE_LABELS[taskType]}:</span>
                 {s.title || '(untitled)'}
                 {s.ticketNumber && <span className="text-gray-400 font-normal ml-1.5">({s.ticketNumber})</span>}
                 <span className="text-gray-400 font-normal ml-1.5">[{STATUS_LABELS[status]}]</span>
+                {s.carryOver && <span className="text-amber-600 font-semibold ml-1.5">[Carry-over]</span>}
               </p>
             </div>
-            <p className="ml-3.5"><span className="font-medium text-gray-500">Yesterday:</span> {s.yesterday.trim() || 'None'}</p>
-            <p className="ml-3.5"><span className="font-medium text-gray-500">Today:</span> {s.today.trim() || '—'}</p>
-            <p className="ml-3.5"><span className="font-medium text-gray-500">Blockers:</span> {s.blockers.trim() || 'None'}</p>
+            <p className={selectable ? 'ml-8' : 'ml-3.5'}><span className="font-medium text-gray-500">Yesterday:</span> {s.yesterday.trim() || 'None'}</p>
+            <p className={selectable ? 'ml-8' : 'ml-3.5'}><span className="font-medium text-gray-500">Today:</span> {s.today.trim() || '—'}</p>
+            <p className={selectable ? 'ml-8' : 'ml-3.5'}><span className="font-medium text-gray-500">Blockers:</span> {s.blockers.trim() || 'None'}</p>
           </div>
         );
       })}
@@ -57,7 +75,7 @@ function StorySnapshotSummary({ stories }: { stories: StoryEntry[] }) {
 }
 
 function HistoryEntry({
-  update, onLoad, onLoadSnapshot, onDelete, onRename, onExportEntry, linkedFileName,
+  update, onLoad, onLoadSnapshot, onDelete, onRename, onExportEntry, onCarryOverStories, linkedFileName,
 }: {
   update: SavedUpdate;
   onLoad: (u: SavedUpdate) => void;
@@ -65,14 +83,17 @@ function HistoryEntry({
   onDelete: (id: string) => void;
   onRename: (id: string, newName: string) => void;
   onExportEntry: (id: string) => void;
+  onCarryOverStories: (update: SavedUpdate, stories: StoryEntry[]) => void;
   linkedFileName?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState('');
+  const [selectedStoryIds, setSelectedStoryIds] = useState<Set<string>>(new Set());
   const renameInputRef = useRef<HTMLInputElement>(null);
   const hasChangelog = update.changelog && update.changelog.length > 0;
+  const selectedStories = update.stories.filter((s) => selectedStoryIds.has(s.id));
 
   function startRename(e: React.MouseEvent) {
     e.stopPropagation();
@@ -90,6 +111,20 @@ function HistoryEntry({
 
   function cancelRename() {
     setRenaming(false);
+  }
+
+  function toggleSelectedStory(id: string) {
+    setSelectedStoryIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function carryOverSelected() {
+    if (selectedStories.length === 0) return;
+    onCarryOverStories(update, selectedStories);
+    setSelectedStoryIds(new Set());
   }
 
   return (
@@ -188,8 +223,20 @@ function HistoryEntry({
 
           {/* Current stories preview */}
           <div className="bg-white rounded-lg border border-gray-200 p-3 mb-3">
-            <StorySnapshotSummary stories={update.stories} />
+            <StorySnapshotSummary
+              stories={update.stories}
+              selectedIds={selectedStoryIds}
+              onToggleStory={toggleSelectedStory}
+            />
           </div>
+          <button
+            onClick={carryOverSelected}
+            disabled={selectedStories.length === 0}
+            className="flex items-center gap-1.5 text-xs font-semibold text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed mb-3"
+          >
+            <CopyPlus className="w-3.5 h-3.5" />
+            Carry over {selectedStories.length > 0 ? selectedStories.length : ''} selected
+          </button>
 
           {/* Changelog toggle — only if checkpoints exist */}
           {hasChangelog && (
@@ -247,7 +294,7 @@ function HistoryEntry({
   );
 }
 
-export default function HistoryPanel({ history, onLoad, onLoadSnapshot, onDelete, onRename, onExportEntry, onExport, onImport, linkedFileNames }: HistoryPanelProps) {
+export default function HistoryPanel({ history, onLoad, onLoadSnapshot, onDelete, onRename, onExportEntry, onExport, onImport, onCarryOverStories, linkedFileNames }: HistoryPanelProps) {
   const [open, setOpen] = useState(true);
 
   return (
@@ -305,6 +352,7 @@ export default function HistoryPanel({ history, onLoad, onLoadSnapshot, onDelete
               onDelete={onDelete}
               onRename={onRename}
               onExportEntry={onExportEntry}
+              onCarryOverStories={onCarryOverStories}
               linkedFileName={linkedFileNames?.[update.id]}
             />
           ))}

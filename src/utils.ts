@@ -75,12 +75,21 @@ function newestCheckpointDate(update: SavedUpdate): string | undefined {
 
 function normalizeStory(story: StoryEntry, fallbackDate: string): StoryEntry {
   const createdAt = story.createdAt ?? fallbackDate;
+  const carryOver = story.carryOver
+    ? {
+        ...story.carryOver,
+        rootStoryId: story.carryOver.rootStoryId ?? story.carryOver.sourceStoryId,
+        generation: story.carryOver.generation ?? 1,
+        carriedOverAt: story.carryOver.carriedOverAt ?? createdAt,
+      }
+    : undefined;
   return {
     ...story,
     status: story.status ?? 'not-started',
     taskType: story.taskType ?? 'task',
     createdAt,
     updatedAt: story.updatedAt ?? createdAt,
+    carryOver,
   };
 }
 

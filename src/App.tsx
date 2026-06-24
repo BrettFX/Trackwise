@@ -7,7 +7,7 @@ import ImportModal from './components/ImportModal';
 import VersionInfo from './components/VersionInfo';
 import OutputSettingsPanel from './components/OutputSettingsPanel';
 import NavPanel from './components/NavPanel';
-import type { StoryEntry, SavedUpdate, StoryStatus, TaskListSettings, TaskListSortKey } from './types';
+import type { StoryEntry, SavedUpdate, StoryStatus, TaskLineageEntry, TaskListSettings, TaskListSortKey } from './types';
 import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, renameUpdate, exportUpdates, exportSingleUpdate, hasUnsavedChanges, loadOutputSettings, saveOutputSettings, loadTaskListSettings, saveTaskListSettings, loadCollapsedTaskIds, saveCollapsedTaskIds } from './utils';
 import { storeFileHandle, getHandleForEntry, getAllLinkedFiles, writeEntriesToHandle, removeHandlesForEntries, isFileSystemSaveSupported } from './fileHandleStore';
 import type { OutputSettings } from './types';
@@ -49,6 +49,50 @@ function hasTaskContent(story: StoryEntry): boolean {
     story.today.trim() ||
     story.blockers.trim()
   );
+}
+
+function taskLineageKey(story: StoryEntry): string {
+  return story.carryOver?.rootStoryId ?? story.id;
+}
+
+function makeCarryOverStory(story: StoryEntry, sourceUpdate: SavedUpdate): StoryEntry {
+  const now = new Date().toISOString();
+  return {
+    ...story,
+    id: crypto.randomUUID(),
+    createdAt: now,
+    updatedAt: now,
+    carryOver: {
+      sourceUpdateId: sourceUpdate.id,
+      sourceUpdateName: sourceUpdate.name,
+      sourceStoryId: story.id,
+      rootStoryId: taskLineageKey(story),
+      carriedOverAt: now,
+      generation: (story.carryOver?.generation ?? 0) + 1,
+    },
+  };
+}
+
+function taskLineageFingerprint(entry: TaskLineageEntry): string {
+  return JSON.stringify({
+    title: entry.title.trim(),
+    status: entry.status,
+    today: entry.today.trim(),
+    blockers: entry.blockers.trim(),
+  });
+}
+
+function dedupeTaskLineage(entries: TaskLineageEntry[]): TaskLineageEntry[] {
+  const sorted = entries.toSorted((a, b) => new Date(a.savedAt).getTime() - new Date(b.savedAt).getTime());
+  return sorted.reduce<TaskLineageEntry[]>((deduped, entry) => {
+    const last = deduped[deduped.length - 1];
+    if (last && taskLineageFingerprint(last) === taskLineageFingerprint(entry)) {
+      deduped[deduped.length - 1] = entry.checkpoint ? last : entry;
+      return deduped;
+    }
+    deduped.push(entry);
+    return deduped;
+  }, []);
 }
 
 function App() {
@@ -139,6 +183,49 @@ function App() {
   const outputCountableStories = stories.filter(hasTaskContent);
   const outputShownCount = outputCountableStories.filter((s) => !outputSettings.excludeStatuses.includes(s.status ?? 'not-started')).length;
 
+  function getTaskLineage(story: StoryEntry): TaskLineageEntry[] {
+    const lineageKey = taskLineageKey(story);
+    const entries: TaskLineageEntry[] = [];
+
+    for (const update of history) {
+      for (const candidate of update.stories) {
+        if (taskLineageKey(candidate) === lineageKey) {
+          entries.push({
+            id: `${update.id}:${candidate.id}:current`,
+            updateId: update.id,
+            updateName: update.name,
+            savedAt: update.updatedAt ?? update.createdAt,
+            title: candidate.title,
+            status: candidate.status ?? 'not-started',
+            today: candidate.today,
+            blockers: candidate.blockers,
+            checkpoint: false,
+          });
+        }
+      }
+      for (const snap of update.changelog ?? []) {
+        for (const candidate of snap.stories) {
+          if (taskLineageKey(candidate) === lineageKey) {
+            entries.push({
+              id: `${update.id}:${snap.savedAt}:${candidate.id}`,
+              updateId: update.id,
+              updateName: update.name,
+              savedAt: snap.savedAt,
+              title: candidate.title,
+              status: candidate.status ?? 'not-started',
+              today: candidate.today,
+              blockers: candidate.blockers,
+              note: snap.note,
+              checkpoint: true,
+            });
+          }
+        }
+      }
+    }
+
+    return dedupeTaskLineage(entries);
+  }
+
   function toggleAll() {
     if (allCollapsed) {
       const next = new Set<string>();
@@ -179,6 +266,24 @@ function App() {
     const story = makeEmptyStory();
     setStories((prev) => [...prev, story]);
   };
+
+  function handleCarryOverStories(sourceUpdate: SavedUpdate, selectedStories: StoryEntry[]) {
+    setStories((prev) => {
+      const existingLineages = new Set(prev.map(taskLineageKey));
+      const copies: StoryEntry[] = [];
+
+      for (const story of selectedStories) {
+        const lineageKey = taskLineageKey(story);
+        if (existingLineages.has(lineageKey)) continue;
+        existingLineages.add(lineageKey);
+        copies.push(makeCarryOverStory(story, sourceUpdate));
+      }
+
+      if (copies.length === 0) return prev;
+      if (prev.length === 1 && !hasTaskContent(prev[0])) return copies;
+      return [...prev, ...copies];
+    });
+  }
 
   function validate(): boolean {
     const newErrors: typeof errors = {};
@@ -601,6 +706,7 @@ function App() {
           onExportEntry={handleExportEntry}
           onExport={handleExport}
           onImport={openImport}
+          onCarryOverStories={handleCarryOverStories}
           linkedFileNames={linkedFileNames}
         />
         </div>
@@ -689,6 +795,7 @@ function App() {
               errors={errors[story.id] ?? {}}
               onChange={handleChange}
               onRemove={handleRemove}
+              lineage={getTaskLineage(story)}
             />
           ))}
         </div>
