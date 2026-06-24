@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Plus, Zap, Save, RefreshCw, Bookmark, FilePlus, Check, ChevronsUpDown, Trash2, TriangleAlert } from 'lucide-react';
+import { Plus, Zap, Save, RefreshCw, Bookmark, FilePlus, Check, ChevronsUpDown, Trash2, TriangleAlert, Filter, ArrowUpDown, X } from 'lucide-react';
 import StoryCard from './components/StoryCard';
 import OutputPanel from './components/OutputPanel';
 import HistoryPanel from './components/HistoryPanel';
@@ -7,10 +7,49 @@ import ImportModal from './components/ImportModal';
 import VersionInfo from './components/VersionInfo';
 import OutputSettingsPanel from './components/OutputSettingsPanel';
 import NavPanel from './components/NavPanel';
-import type { StoryEntry, SavedUpdate } from './types';
-import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, renameUpdate, exportUpdates, exportSingleUpdate, hasUnsavedChanges, loadOutputSettings, saveOutputSettings } from './utils';
+import type { StoryEntry, SavedUpdate, StoryStatus, TaskListSettings, TaskListSortKey } from './types';
+import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, renameUpdate, exportUpdates, exportSingleUpdate, hasUnsavedChanges, loadOutputSettings, saveOutputSettings, loadTaskListSettings, saveTaskListSettings, loadCollapsedTaskIds, saveCollapsedTaskIds } from './utils';
 import { storeFileHandle, getHandleForEntry, getAllLinkedFiles, writeEntriesToHandle, removeHandlesForEntries } from './fileHandleStore';
 import type { OutputSettings } from './types';
+
+const STATUS_LABELS: Record<StoryStatus, string> = {
+  'not-started': 'Not Started',
+  'in-progress': 'In Progress',
+  'done': 'Done',
+  'blocked': 'Blocked',
+};
+
+const STATUS_SORT_ORDER: Record<StoryStatus, number> = {
+  'in-progress': 0,
+  blocked: 1,
+  'not-started': 2,
+  done: 3,
+};
+
+const SORT_OPTIONS: { value: TaskListSortKey; label: string }[] = [
+  { value: 'createdAt', label: 'Date Created' },
+  { value: 'updatedAt', label: 'Date Modified' },
+  { value: 'status', label: 'State' },
+];
+
+const FILTER_OPTIONS: { value: StoryStatus | 'all'; label: string }[] = [
+  { value: 'all', label: 'All States' },
+  { value: 'in-progress', label: STATUS_LABELS['in-progress'] },
+  { value: 'blocked', label: STATUS_LABELS.blocked },
+  { value: 'not-started', label: STATUS_LABELS['not-started'] },
+  { value: 'done', label: STATUS_LABELS.done },
+];
+
+function hasTaskContent(story: StoryEntry): boolean {
+  return Boolean(
+    story.title.trim() ||
+    story.ticketNumber.trim() ||
+    story.jiraUrl.trim() ||
+    story.yesterday.trim() ||
+    story.today.trim() ||
+    story.blockers.trim()
+  );
+}
 
 function App() {
   const [stories, setStories] = useState<StoryEntry[]>([makeEmptyStory()]);
@@ -19,6 +58,7 @@ function App() {
   const [history, setHistory] = useState<SavedUpdate[]>(() => loadSavedUpdates());
   const [currentUpdateId, setCurrentUpdateId] = useState<string | null>(null);
   const [outputSettings, setOutputSettings] = useState<OutputSettings>(() => loadOutputSettings());
+  const [taskListSettings, setTaskListSettings] = useState<TaskListSettings>(() => loadTaskListSettings());
 
   // ── Linked file handles (File System Access API) ─────────────────────
   // Maps entry ID → file name for entries that were imported from a file.
@@ -54,6 +94,11 @@ function App() {
     if (htmlOutput) setHtmlOutput(formatOutputHTML(stories, next));
   }
 
+  function handleTaskListSettingsChange(next: TaskListSettings) {
+    setTaskListSettings(next);
+    saveTaskListSettings(next);
+  }
+
   // Save-as-new modal
   const [saveNamePrompt, setSaveNamePrompt] = useState(false);
   const [saveName, setSaveName] = useState('');
@@ -63,23 +108,44 @@ function App() {
   const [silentSavedFeedback, setSilentSavedFeedback] = useState(false);
 
   // Collapsed story cards
-  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => loadCollapsedTaskIds());
 
   const toggleCard = useCallback((id: string) => {
     setCollapsedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
+      saveCollapsedTaskIds(next);
       return next;
     });
   }, []);
 
-  const allCollapsed = stories.length > 0 && stories.every((s) => collapsedIds.has(s.id));
+  const visibleStories = stories
+    .filter((story) => taskListSettings.filterStatus === 'all' || (story.status ?? 'not-started') === taskListSettings.filterStatus)
+    .toSorted((a, b) => {
+      if (taskListSettings.sortBy === 'status') {
+        const statusDelta = STATUS_SORT_ORDER[a.status ?? 'not-started'] - STATUS_SORT_ORDER[b.status ?? 'not-started'];
+        if (statusDelta !== 0) return statusDelta;
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      }
+      const aTime = new Date(a[taskListSettings.sortBy] ?? a.createdAt).getTime();
+      const bTime = new Date(b[taskListSettings.sortBy] ?? b.createdAt).getTime();
+      return taskListSettings.sortBy === 'updatedAt' ? bTime - aTime : aTime - bTime;
+    });
+  const filteredOutCount = stories.length - visibleStories.length;
+  const filterActive = taskListSettings.filterStatus !== 'all';
+  const allCollapsed = visibleStories.length > 0 && visibleStories.every((s) => collapsedIds.has(s.id));
+  const outputCountableStories = stories.filter(hasTaskContent);
+  const outputShownCount = outputCountableStories.filter((s) => !outputSettings.excludeStatuses.includes(s.status ?? 'not-started')).length;
 
   function toggleAll() {
     if (allCollapsed) {
-      setCollapsedIds(new Set());
+      const next = new Set<string>();
+      setCollapsedIds(next);
+      saveCollapsedTaskIds(next);
     } else {
-      setCollapsedIds(new Set(stories.map((s) => s.id)));
+      const next = new Set(visibleStories.map((s) => s.id));
+      setCollapsedIds(next);
+      saveCollapsedTaskIds(next);
     }
   }
 
@@ -89,7 +155,7 @@ function App() {
   const [checkpointStatus, setCheckpointStatus] = useState<'idle' | 'saved' | 'skipped'>('idle');
 
   const handleChange = useCallback((id: string, field: keyof StoryEntry, value: string) => {
-    setStories((prev) => prev.map((s) => (s.id === id ? { ...s, [field]: value } : s)));
+    setStories((prev) => prev.map((s) => (s.id === id ? { ...s, [field]: value, updatedAt: new Date().toISOString() } : s)));
     setErrors((prev) => {
       const copy = { ...prev };
       if (copy[id]) delete copy[id][field];
@@ -99,7 +165,12 @@ function App() {
 
   const handleRemove = useCallback((id: string) => {
     setStories((prev) => prev.filter((s) => s.id !== id));
-    setCollapsedIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+    setCollapsedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      saveCollapsedTaskIds(next);
+      return next;
+    });
   }, []);
 
   const addStory = () => {
@@ -277,6 +348,8 @@ function App() {
     setErrors({});
     setCurrentUpdateId(null);
     setSaveName('');
+    setCollapsedIds(new Set());
+    saveCollapsedTaskIds(new Set());
   }
 
   const isEditing = currentUpdateId !== null;
@@ -490,14 +563,60 @@ function App() {
         )}
 
         {/* Story cards */}
-        <div className="flex items-center justify-between mb-3 px-1">
-          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-            {stories.length} {stories.length === 1 ? 'Item' : 'Items'}
-          </span>
-          {stories.length > 1 && (
+        <div className="mb-3 px-1">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                {visibleStories.length} of {stories.length} {stories.length === 1 ? 'Item' : 'Items'} shown
+              </span>
+              {filteredOutCount > 0 && (
+                <span className="text-xs text-gray-400">
+                  {filteredOutCount} filtered out
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="relative">
+                <span className="sr-only">Sort tasks</span>
+                <ArrowUpDown className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                <select
+                  value={taskListSettings.sortBy}
+                  onChange={(e) => handleTaskListSettingsChange({ ...taskListSettings, sortBy: e.target.value as TaskListSortKey })}
+                  className="h-9 rounded-lg border border-gray-200 bg-white pl-8 pr-8 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 appearance-none cursor-pointer"
+                >
+                  {SORT_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>Sort: {opt.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="relative">
+                <span className="sr-only">Filter tasks by state</span>
+                <Filter className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                <select
+                  value={taskListSettings.filterStatus}
+                  onChange={(e) => handleTaskListSettingsChange({ ...taskListSettings, filterStatus: e.target.value as TaskListSettings['filterStatus'] })}
+                  className="h-9 rounded-lg border border-gray-200 bg-white pl-8 pr-8 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 appearance-none cursor-pointer"
+                >
+                  {FILTER_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>State: {opt.label}</option>
+                  ))}
+                </select>
+              </label>
+              {filterActive && (
+                <button
+                  onClick={() => handleTaskListSettingsChange({ ...taskListSettings, filterStatus: 'all' })}
+                  className="flex h-9 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-semibold text-gray-500 hover:bg-gray-50 hover:text-indigo-600 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+          {visibleStories.length > 1 && (
             <button
               onClick={toggleAll}
-              className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition-colors"
+              className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition-colors"
             >
               <ChevronsUpDown className="w-3.5 h-3.5" />
               {allCollapsed ? 'Expand All' : 'Collapse All'}
@@ -505,7 +624,7 @@ function App() {
           )}
         </div>
         <div className="flex flex-col gap-3 mb-5">
-          {stories.map((story, idx) => (
+          {visibleStories.map((story, idx) => (
             <StoryCard
               key={story.id}
               story={story}
@@ -587,8 +706,8 @@ function App() {
         <OutputSettingsPanel
           settings={outputSettings}
           onChange={handleOutputSettingsChange}
-          filteredCount={stories.filter((s) => !outputSettings.excludeStatuses.includes(s.status ?? 'not-started')).length}
-          totalCount={stories.length}
+          filteredCount={outputShownCount}
+          totalCount={outputCountableStories.length}
         />
         <OutputPanel htmlOutput={htmlOutput} />
         </div>{/* end section-output */}

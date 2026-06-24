@@ -127,7 +127,7 @@ function HistoryEntry({
               <span className="text-sm font-medium text-gray-800 truncate">{update.name}</span>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs text-gray-400">
-                  {formatDate(update.createdAt)} · {update.stories.length} {update.stories.length === 1 ? 'item' : 'items'}
+                  Created {formatDate(update.createdAt)} · Last saved {formatDate(update.updatedAt ?? update.createdAt)} · {update.stories.length} {update.stories.length === 1 ? 'item' : 'items'}
                 </span>
                 {hasChangelog && (
                   <span className="text-xs text-indigo-400 font-medium">

@@ -1,11 +1,18 @@
-import type { StoryEntry, SavedUpdate, UpdateSnapshot, StoryStatus, TaskType, OutputSettings } from './types';
+import type { StoryEntry, SavedUpdate, UpdateSnapshot, StoryStatus, TaskType, OutputSettings, TaskListSettings } from './types';
 
 const STORAGE_KEY = 'ytb-saved-updates';
 const OUTPUT_SETTINGS_KEY = 'trackwise-output-settings';
+const TASK_LIST_SETTINGS_KEY = 'trackwise-task-list-settings';
+const COLLAPSED_TASK_IDS_KEY = 'trackwise-collapsed-task-ids';
 
 export const DEFAULT_OUTPUT_SETTINGS: OutputSettings = {
   showStatus: true,
   excludeStatuses: [],
+};
+
+export const DEFAULT_TASK_LIST_SETTINGS: TaskListSettings = {
+  sortBy: 'createdAt',
+  filterStatus: 'all',
 };
 
 export function loadOutputSettings(): OutputSettings {
@@ -20,6 +27,75 @@ export function loadOutputSettings(): OutputSettings {
 
 export function saveOutputSettings(settings: OutputSettings): void {
   localStorage.setItem(OUTPUT_SETTINGS_KEY, JSON.stringify(settings));
+}
+
+export function loadTaskListSettings(): TaskListSettings {
+  try {
+    const raw = sessionStorage.getItem(TASK_LIST_SETTINGS_KEY);
+    if (!raw) return { ...DEFAULT_TASK_LIST_SETTINGS };
+    const parsed = JSON.parse(raw) as Partial<TaskListSettings>;
+    const sortBy = parsed.sortBy === 'updatedAt' || parsed.sortBy === 'status' ? parsed.sortBy : DEFAULT_TASK_LIST_SETTINGS.sortBy;
+    const filterStatus = isStoryStatus(parsed.filterStatus) ? parsed.filterStatus : DEFAULT_TASK_LIST_SETTINGS.filterStatus;
+    return { sortBy, filterStatus };
+  } catch {
+    return { ...DEFAULT_TASK_LIST_SETTINGS };
+  }
+}
+
+export function saveTaskListSettings(settings: TaskListSettings): void {
+  sessionStorage.setItem(TASK_LIST_SETTINGS_KEY, JSON.stringify(settings));
+}
+
+export function loadCollapsedTaskIds(): Set<string> {
+  try {
+    const raw = sessionStorage.getItem(COLLAPSED_TASK_IDS_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((id): id is string => typeof id === 'string'));
+  } catch {
+    return new Set();
+  }
+}
+
+export function saveCollapsedTaskIds(ids: Set<string>): void {
+  sessionStorage.setItem(COLLAPSED_TASK_IDS_KEY, JSON.stringify([...ids]));
+}
+
+function isStoryStatus(value: unknown): value is StoryStatus {
+  return value === 'not-started' || value === 'in-progress' || value === 'done' || value === 'blocked';
+}
+
+function newestCheckpointDate(update: SavedUpdate): string | undefined {
+  return update.changelog?.reduce<string | undefined>((latest, snap) => {
+    if (!latest || new Date(snap.savedAt).getTime() > new Date(latest).getTime()) return snap.savedAt;
+    return latest;
+  }, undefined);
+}
+
+function normalizeStory(story: StoryEntry, fallbackDate: string): StoryEntry {
+  const createdAt = story.createdAt ?? fallbackDate;
+  return {
+    ...story,
+    status: story.status ?? 'not-started',
+    taskType: story.taskType ?? 'task',
+    createdAt,
+    updatedAt: story.updatedAt ?? createdAt,
+  };
+}
+
+function normalizeUpdate(update: SavedUpdate): SavedUpdate {
+  const changelog = update.changelog ?? [];
+  const updatedAt = update.updatedAt ?? newestCheckpointDate({ ...update, changelog }) ?? update.createdAt;
+  return {
+    ...update,
+    updatedAt,
+    changelog: changelog.map((snap) => ({
+      ...snap,
+      stories: snap.stories.map((s) => normalizeStory(s, snap.savedAt)),
+    })),
+    stories: update.stories.map((s) => normalizeStory(s, update.createdAt)),
+  };
 }
 
 function escapeHtml(str: string): string {
@@ -39,16 +115,7 @@ export function loadSavedUpdates(): SavedUpdate[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as SavedUpdate[];
-    // Migrate entries: add changelog if missing, add status/taskType to stories if missing
-    return parsed.map((u) => ({
-      ...u,
-      changelog: u.changelog ?? [],
-      stories: u.stories.map((s) => ({
-        ...s,
-        status: s.status ?? 'not-started',
-        taskType: s.taskType ?? 'task',
-      })),
-    }));
+    return parsed.map(normalizeUpdate);
   } catch {
     return [];
   }
@@ -56,10 +123,12 @@ export function loadSavedUpdates(): SavedUpdate[] {
 
 /** Create a brand-new saved entry with an empty changelog. */
 export function saveAsNew(name: string, stories: StoryEntry[]): SavedUpdate {
+  const now = new Date().toISOString();
   const update: SavedUpdate = {
     id: crypto.randomUUID(),
     name: name.trim() || `Update – ${new Date().toLocaleString()}`,
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+    updatedAt: now,
     stories,
     changelog: [],
   };
@@ -76,6 +145,7 @@ export function silentSave(id: string, name: string, stories: StoryEntry[]): Sav
   if (idx < 0) return null;
   all[idx].name = name.trim() || all[idx].name;
   all[idx].stories = stories;
+  all[idx].updatedAt = new Date().toISOString();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
   return all[idx];
 }
@@ -128,6 +198,7 @@ export function saveCheckpoint(
   };
   existing.changelog = [...existing.changelog, snapshot];
   existing.stories = stories;
+  existing.updatedAt = snapshot.savedAt;
   all[idx] = existing;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
   return { saved: true, update: existing };
@@ -143,6 +214,7 @@ export function renameUpdate(id: string, newName: string): void {
   const idx = all.findIndex((u) => u.id === id);
   if (idx < 0) return;
   all[idx].name = newName.trim() || all[idx].name;
+  all[idx].updatedAt = new Date().toISOString();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
 }
 
@@ -256,11 +328,11 @@ export function importUpdates(json: string, mode: ImportMode): ImportResult {
       result.skipped++;
       continue;
     }
-    const entry: SavedUpdate = {
+    const entry: SavedUpdate = normalizeUpdate({
       ...raw,
       id: raw.id ?? crypto.randomUUID(),
       changelog: raw.changelog ?? [],
-    };
+    });
 
     if (existingIds.has(entry.id)) {
       result.duplicates++;
@@ -317,7 +389,7 @@ export function previewImport(json: string): ImportPreview {
 
   for (const raw of incoming) {
     if (!isValidUpdate(raw)) { invalid++; continue; }
-    const entry: SavedUpdate = { ...raw, id: raw.id ?? crypto.randomUUID(), changelog: raw.changelog ?? [] };
+    const entry: SavedUpdate = normalizeUpdate({ ...raw, id: raw.id ?? crypto.randomUUID(), changelog: raw.changelog ?? [] });
     if (existingIds.has(entry.id)) duplicates++;
     valid.push(entry);
   }
@@ -391,5 +463,18 @@ export function formatOutputHTML(stories: StoryEntry[], settings: OutputSettings
 }
 
 export function makeEmptyStory(): StoryEntry {
-  return { id: crypto.randomUUID(), taskType: 'task', title: '', ticketNumber: '', jiraUrl: '', yesterday: '', today: '', blockers: '', status: 'not-started' };
+  const now = new Date().toISOString();
+  return {
+    id: crypto.randomUUID(),
+    taskType: 'task',
+    title: '',
+    ticketNumber: '',
+    jiraUrl: '',
+    yesterday: '',
+    today: '',
+    blockers: '',
+    status: 'not-started',
+    createdAt: now,
+    updatedAt: now,
+  };
 }

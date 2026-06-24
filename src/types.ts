@@ -16,6 +16,8 @@ export interface StoryEntry {
   today: string;
   blockers: string;
   status: StoryStatus;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface UpdateSnapshot {
@@ -28,6 +30,14 @@ export interface SavedUpdate {
   id: string;
   name: string;
   createdAt: string;
+  updatedAt: string;
   stories: StoryEntry[];
   changelog: UpdateSnapshot[]; // ordered oldest → newest
+}
+
+export type TaskListSortKey = 'createdAt' | 'updatedAt' | 'status';
+
+export interface TaskListSettings {
+  sortBy: TaskListSortKey;
+  filterStatus: StoryStatus | 'all';
 }
