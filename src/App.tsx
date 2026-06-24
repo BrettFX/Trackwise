@@ -9,7 +9,7 @@ import OutputSettingsPanel from './components/OutputSettingsPanel';
 import NavPanel from './components/NavPanel';
 import type { StoryEntry, SavedUpdate, StoryStatus, TaskListSettings, TaskListSortKey } from './types';
 import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, renameUpdate, exportUpdates, exportSingleUpdate, hasUnsavedChanges, loadOutputSettings, saveOutputSettings, loadTaskListSettings, saveTaskListSettings, loadCollapsedTaskIds, saveCollapsedTaskIds } from './utils';
-import { storeFileHandle, getHandleForEntry, getAllLinkedFiles, writeEntriesToHandle, removeHandlesForEntries } from './fileHandleStore';
+import { storeFileHandle, getHandleForEntry, getAllLinkedFiles, writeEntriesToHandle, removeHandlesForEntries, isFileSystemSaveSupported } from './fileHandleStore';
 import type { OutputSettings } from './types';
 
 const STATUS_LABELS: Record<StoryStatus, string> = {
@@ -102,6 +102,8 @@ function App() {
   // Save-as-new modal
   const [saveNamePrompt, setSaveNamePrompt] = useState(false);
   const [saveName, setSaveName] = useState('');
+  const [saveNewToFile, setSaveNewToFile] = useState(false);
+  const [savingNew, setSavingNew] = useState(false);
   const afterSaveRef = useRef<(() => void) | null>(null);
 
   // Silent save feedback
@@ -215,19 +217,33 @@ function App() {
   // ── Save as new ──────────────────────────────────────────────────────
   function openSaveAsNewPrompt() {
     setSaveName(stories[0]?.title ? `${stories[0].title} – ${new Date().toLocaleDateString()}` : '');
+    setSaveNewToFile(false);
     setSaveNamePrompt(true);
   }
 
-  function confirmSaveAsNew() {
-    const saved = saveAsNew(saveName, stories);
-    setHistory(loadSavedUpdates());
-    setCurrentUpdateId(saved.id);
-    setSaveName(saved.name);
-    setSaveNamePrompt(false);
-    if (afterSaveRef.current) {
-      const fn = afterSaveRef.current;
-      afterSaveRef.current = null;
-      fn();
+  async function confirmSaveAsNew() {
+    if (savingNew) return;
+    setSavingNew(true);
+    try {
+      const saved = saveAsNew(saveName, stories);
+      if (saveNewToFile) {
+        const result = await exportSingleUpdate(saved.id);
+        if (result?.handle) {
+          await storeFileHandle(result.handle, result.entryIds);
+          await refreshLinkedFileNames();
+        }
+      }
+      setHistory(loadSavedUpdates());
+      setCurrentUpdateId(saved.id);
+      setSaveName(saved.name);
+      setSaveNamePrompt(false);
+      if (afterSaveRef.current) {
+        const fn = afterSaveRef.current;
+        afterSaveRef.current = null;
+        fn();
+      }
+    } finally {
+      setSavingNew(false);
     }
   }
 
@@ -306,12 +322,20 @@ function App() {
   }
 
   // ── Export / Import ──────────────────────────────────────────────────
-  function handleExport() {
-    exportUpdates();
+  async function handleExport() {
+    const result = await exportUpdates();
+    if (result.handle && result.entryIds.length > 0) {
+      await storeFileHandle(result.handle, result.entryIds);
+      await refreshLinkedFileNames();
+    }
   }
 
-  function handleExportEntry(id: string) {
-    exportSingleUpdate(id);
+  async function handleExportEntry(id: string) {
+    const result = await exportSingleUpdate(id);
+    if (result?.handle && result.entryIds.length > 0) {
+      await storeFileHandle(result.handle, result.entryIds);
+      await refreshLinkedFileNames();
+    }
   }
 
   const [importOpen, setImportOpen] = useState(false);
@@ -376,23 +400,53 @@ function App() {
           <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md">
               <h2 className="text-lg font-bold text-gray-900 mb-1">Save as New</h2>
-              <p className="text-sm text-gray-500 mb-4">Give this update a name so you can load it later.</p>
+              <p className="text-sm text-gray-500 mb-4">
+                Give this update a name. Trackwise saves it in this browser; you can also link it to a JSON file.
+              </p>
               <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">Name</label>
               <input
                 autoFocus
                 type="text"
                 value={saveName}
                 onChange={(e) => setSaveName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && confirmSaveAsNew()}
+                onKeyDown={(e) => e.key === 'Enter' && !savingNew && confirmSaveAsNew()}
                 placeholder="e.g. Sprint 42 – Day 3"
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-5 focus:outline-none focus:ring-2 focus:ring-indigo-300"
               />
+              {isFileSystemSaveSupported() ? (
+                <label className="flex items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 mb-5 cursor-pointer hover:bg-gray-100 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={saveNewToFile}
+                    onChange={(e) => setSaveNewToFile(e.target.checked)}
+                    className="mt-0.5 rounded accent-indigo-600 w-4 h-4 shrink-0"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-gray-700">Save and link a JSON file</span>
+                    <span className="block text-xs text-gray-400 mt-0.5">
+                      Choose a file location now so future saves sync back to that file.
+                    </span>
+                  </span>
+                </label>
+              ) : (
+                <p className="text-xs text-gray-400 mb-5">
+                  File linking is not available in this browser. The update will be saved locally in this browser.
+                </p>
+              )}
               <div className="flex gap-3 justify-end">
-                <button onClick={() => setSaveNamePrompt(false)} className="text-sm px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">
+                <button
+                  onClick={() => setSaveNamePrompt(false)}
+                  disabled={savingNew}
+                  className="text-sm px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   Cancel
                 </button>
-                <button onClick={confirmSaveAsNew} className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-colors">
-                  Save
+                <button
+                  onClick={confirmSaveAsNew}
+                  disabled={savingNew}
+                  className="text-sm px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {savingNew ? 'Saving...' : 'Save'}
                 </button>
               </div>
             </div>
@@ -712,7 +766,7 @@ function App() {
         <OutputPanel htmlOutput={htmlOutput} />
         </div>{/* end section-output */}
 
-        <p className="text-center text-xs text-gray-400 mt-6">Saved updates are stored locally in your browser.</p>
+        <p className="text-center text-xs text-gray-400 mt-6">Saved updates are stored locally in your browser unless linked to a JSON file.</p>
       </div>
     </div>
   );

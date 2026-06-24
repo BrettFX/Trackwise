@@ -101,6 +101,11 @@ export function isFileSystemAccessSupported(): boolean {
   return typeof window !== 'undefined' && 'showOpenFilePicker' in window;
 }
 
+/** True when the browser supports saving directly to user-selected files. */
+export function isFileSystemSaveSupported(): boolean {
+  return typeof window !== 'undefined' && 'showSaveFilePicker' in window;
+}
+
 /**
  * Write the entries that originated from a handle's file back to that file.
  * Requests write permission if needed (this must be called from a user-gesture

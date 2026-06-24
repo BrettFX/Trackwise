@@ -226,43 +226,67 @@ export interface ExportPayload {
   updates: SavedUpdate[];
 }
 
-/** Trigger a JSON file download containing all saved updates. */
-export function exportUpdates(): void {
-  const updates = loadSavedUpdates();
-  const payload: ExportPayload = {
+export interface ExportResult {
+  handle?: FileSystemFileHandle;
+  entryIds: string[];
+}
+
+function makeExportPayload(updates: SavedUpdate[]): ExportPayload {
+  return {
     version: 1,
     exportedAt: new Date().toISOString(),
     updates,
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+}
+
+function downloadExport(updates: SavedUpdate[], fileName: string): void {
+  const blob = new Blob([JSON.stringify(makeExportPayload(updates), null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const date = new Date().toISOString().slice(0, 10);
   a.href = url;
-  a.download = `trackwise-export-${date}.json`;
+  a.download = fileName;
   a.click();
   URL.revokeObjectURL(url);
 }
 
+async function saveExport(updates: SavedUpdate[], suggestedName: string): Promise<FileSystemFileHandle | undefined> {
+  if (typeof window === 'undefined' || !('showSaveFilePicker' in window)) {
+    downloadExport(updates, suggestedName);
+    return undefined;
+  }
+
+  try {
+    const handle = await window.showSaveFilePicker({
+      suggestedName,
+      types: [{ description: 'JSON files', accept: { 'application/json': ['.json'] } }],
+      excludeAcceptAllOption: false,
+    });
+    const writable = await handle.createWritable();
+    await writable.write(JSON.stringify(makeExportPayload(updates), null, 2));
+    await writable.close();
+    return handle;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Trigger a JSON file download containing all saved updates. */
+export async function exportUpdates(): Promise<ExportResult> {
+  const updates = loadSavedUpdates();
+  const date = new Date().toISOString().slice(0, 10);
+  const handle = await saveExport(updates, `trackwise-export-${date}.json`);
+  return { handle, entryIds: updates.map((u) => u.id) };
+}
+
 /** Trigger a JSON file download containing a single saved update (always uses the
  *  latest version from storage so renames are reflected in the downloaded file). */
-export function exportSingleUpdate(id: string): void {
+export async function exportSingleUpdate(id: string): Promise<ExportResult | null> {
   const update = loadSavedUpdates().find((u) => u.id === id);
-  if (!update) return;
-  const payload: ExportPayload = {
-    version: 1,
-    exportedAt: new Date().toISOString(),
-    updates: [update],
-  };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  if (!update) return null;
   const date = new Date().toISOString().slice(0, 10);
   const slug = update.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  a.href = url;
-  a.download = `trackwise-${slug}-${date}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
+  const handle = await saveExport([update], `trackwise-${slug}-${date}.json`);
+  return { handle, entryIds: [update.id] };
 }
 
 export type ImportMode = 'merge' | 'replace';

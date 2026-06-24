@@ -9,8 +9,18 @@ interface ShowOpenFilePickerOptions {
   }>;
 }
 
+interface ShowSaveFilePickerOptions {
+  suggestedName?: string;
+  excludeAcceptAllOption?: boolean;
+  types?: Array<{
+    description?: string;
+    accept?: Record<string, string[]>;
+  }>;
+}
+
 interface Window {
   showOpenFilePicker(options?: ShowOpenFilePickerOptions): Promise<FileSystemFileHandle[]>;
+  showSaveFilePicker(options?: ShowSaveFilePickerOptions): Promise<FileSystemFileHandle>;
 }
 
 interface FileSystemHandle {
