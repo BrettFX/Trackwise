@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { Plus, Zap, Save, RefreshCw, Bookmark, FilePlus, Check, ChevronsUpDown, Trash2, TriangleAlert, Filter, ArrowUpDown, X } from 'lucide-react';
+import { useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
+import { Plus, Zap, Save, RefreshCw, Bookmark, FilePlus, Check, ChevronsUpDown, Trash2, TriangleAlert, Filter, ArrowUpDown, X, Settings } from 'lucide-react';
 import StoryCard from './components/StoryCard';
 import OutputPanel from './components/OutputPanel';
 import HistoryPanel from './components/HistoryPanel';
@@ -8,7 +8,7 @@ import VersionInfo from './components/VersionInfo';
 import OutputSettingsPanel from './components/OutputSettingsPanel';
 import NavPanel from './components/NavPanel';
 import type { StoryEntry, SavedUpdate, StoryStatus, TaskLineageEntry, TaskListSettings, TaskListSortKey } from './types';
-import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, renameUpdate, exportUpdates, exportSingleUpdate, hasUnsavedChanges, loadOutputSettings, saveOutputSettings, loadTaskListSettings, saveTaskListSettings, loadCollapsedTaskIds, saveCollapsedTaskIds } from './utils';
+import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, renameUpdate, exportUpdates, exportSingleUpdate, hasUnsavedChanges, loadOutputSettings, saveOutputSettings, loadTaskListSettings, saveTaskListSettings, loadCollapsedTaskIds, saveCollapsedTaskIds, TASK_PRIORITY_LABELS, TASK_PRIORITY_SCORES } from './utils';
 import { storeFileHandle, getHandleForEntry, getAllLinkedFiles, writeEntriesToHandle, removeHandlesForEntries, isFileSystemSaveSupported } from './fileHandleStore';
 import type { OutputSettings } from './types';
 
@@ -27,6 +27,7 @@ const STATUS_SORT_ORDER: Record<StoryStatus, number> = {
 };
 
 const SORT_OPTIONS: { value: TaskListSortKey; label: string }[] = [
+  { value: 'priority', label: 'Priority' },
   { value: 'createdAt', label: 'Date Created' },
   { value: 'updatedAt', label: 'Date Modified' },
   { value: 'status', label: 'State' },
@@ -39,6 +40,57 @@ const FILTER_OPTIONS: { value: StoryStatus | 'all'; label: string }[] = [
   { value: 'not-started', label: STATUS_LABELS['not-started'] },
   { value: 'done', label: STATUS_LABELS.done },
 ];
+
+const PRIORITY_FILTER_OPTIONS: { value: TaskListSettings['filterPriority']; label: string }[] = [
+  { value: 'all', label: 'All Priorities' },
+  { value: 'high', label: TASK_PRIORITY_LABELS.high },
+  { value: 'medium', label: TASK_PRIORITY_LABELS.medium },
+  { value: 'low', label: TASK_PRIORITY_LABELS.low },
+  { value: 'none', label: 'Unassigned' },
+];
+
+const DATE_FILTER_OPTIONS: { value: TaskListSettings['filterDate']; label: string }[] = [
+  { value: 'all', label: 'Any Date' },
+  { value: 'created-today', label: 'Created Today' },
+  { value: 'updated-today', label: 'Updated Today' },
+  { value: 'created-week', label: 'Created Last 7 Days' },
+  { value: 'updated-week', label: 'Updated Last 7 Days' },
+];
+
+function isToday(iso: string): boolean {
+  return new Date(iso).toDateString() === new Date().toDateString();
+}
+
+function isWithinLastWeek(iso: string): boolean {
+  const time = new Date(iso).getTime();
+  const now = Date.now();
+  return Number.isFinite(time) && time >= now - 7 * 24 * 60 * 60 * 1000 && time <= now;
+}
+
+function matchesDateFilter(story: StoryEntry, filterDate: TaskListSettings['filterDate']): boolean {
+  if (filterDate === 'all') return true;
+  if (filterDate === 'created-today') return isToday(story.createdAt);
+  if (filterDate === 'updated-today') return isToday(story.updatedAt ?? story.createdAt);
+  if (filterDate === 'created-week') return isWithinLastWeek(story.createdAt);
+  return isWithinLastWeek(story.updatedAt ?? story.createdAt);
+}
+
+function sortStoriesBy(stories: StoryEntry[], sortBy: TaskListSortKey, order: Map<string, number>): StoryEntry[] {
+  return stories.toSorted((a, b) => {
+    const manualDelta = (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0);
+    if (sortBy === 'priority') {
+      const priorityDelta = (b.priority ? TASK_PRIORITY_SCORES[b.priority] : 0) - (a.priority ? TASK_PRIORITY_SCORES[a.priority] : 0);
+      return priorityDelta || manualDelta;
+    }
+    if (sortBy === 'status') {
+      const statusDelta = STATUS_SORT_ORDER[a.status ?? 'not-started'] - STATUS_SORT_ORDER[b.status ?? 'not-started'];
+      return statusDelta || manualDelta;
+    }
+    const aTime = new Date(a[sortBy] ?? a.createdAt).getTime();
+    const bTime = new Date(b[sortBy] ?? b.createdAt).getTime();
+    return sortBy === 'updatedAt' ? bTime - aTime || manualDelta : aTime - bTime || manualDelta;
+  });
+}
 
 function hasTaskContent(story: StoryEntry): boolean {
   return Boolean(
@@ -55,11 +107,12 @@ function taskLineageKey(story: StoryEntry): string {
   return story.carryOver?.rootStoryId ?? story.id;
 }
 
-function makeCarryOverStory(story: StoryEntry, sourceUpdate: SavedUpdate): StoryEntry {
+function makeCarryOverStory(story: StoryEntry, sourceUpdate: SavedUpdate, sequenceNumber: number): StoryEntry {
   const now = new Date().toISOString();
   return {
     ...story,
     id: crypto.randomUUID(),
+    sequenceNumber,
     createdAt: now,
     updatedAt: now,
     carryOver: {
@@ -95,6 +148,38 @@ function dedupeTaskLineage(entries: TaskLineageEntry[]): TaskLineageEntry[] {
   }, []);
 }
 
+function DropSlot({
+  active, onDragOver, onDrop,
+}: {
+  active: boolean;
+  onDragOver: () => void;
+  onDrop: () => void;
+}) {
+  return (
+    <div
+      className={`transition-all duration-150 ease-out ${active ? 'h-9 py-1' : 'h-0 py-0'}`}
+      onDragEnter={(e) => {
+        e.preventDefault();
+        onDragOver();
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        onDragOver();
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop();
+      }}
+    >
+      <div className={`h-full rounded-lg border-2 border-dashed bg-indigo-50/80 shadow-inner transition-all duration-150 ${active ? 'border-indigo-300 opacity-100 scale-100' : 'border-transparent opacity-0 scale-95'}`} />
+    </div>
+  );
+}
+
+function nextSequenceNumber(stories: StoryEntry[]): number {
+  return Math.max(0, ...stories.map((story) => story.sequenceNumber ?? 0)) + 1;
+}
+
 function App() {
   const [stories, setStories] = useState<StoryEntry[]>([makeEmptyStory()]);
   const [htmlOutput, setHtmlOutput] = useState('');
@@ -119,7 +204,11 @@ function App() {
     } catch { /* IndexedDB unavailable */ }
   }
 
-  useEffect(() => { refreshLinkedFileNames(); }, []);
+  useEffect(() => {
+    queueMicrotask(() => {
+      void refreshLinkedFileNames();
+    });
+  }, []);
 
   /** Write the current storage snapshot back to the linked file for this entry.
    *  Must be called from a user-gesture handler so permission prompts are allowed. */
@@ -143,6 +232,25 @@ function App() {
     saveTaskListSettings(next);
   }
 
+  function handleSortChange(sortBy: TaskListSortKey) {
+    captureTaskLayout();
+    setStories((prev) => {
+      const order = new Map(prev.map((story, idx) => [story.id, idx]));
+      const visibleIds = new Set(visibleStories.map((story) => story.id));
+      const sortedVisibleIds = sortStoriesBy(
+        prev.filter((story) => visibleIds.has(story.id)),
+        sortBy,
+        order
+      ).map((story) => story.id);
+      const reordered = reorderVisibleStories(prev, sortedVisibleIds);
+      void persistStoryOrder(reordered);
+      return reordered;
+    });
+    const next = { ...taskListSettings, sortBy };
+    setTaskListSettings(next);
+    saveTaskListSettings(next);
+  }
+
   // Save-as-new modal
   const [saveNamePrompt, setSaveNamePrompt] = useState(false);
   const [saveName, setSaveName] = useState('');
@@ -155,6 +263,29 @@ function App() {
 
   // Collapsed story cards
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => loadCollapsedTaskIds());
+  const [draggingStoryId, setDraggingStoryId] = useState<string | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
+  const draggingStoryIdRef = useRef<string | null>(null);
+  const filterMenuRef = useRef<HTMLDetailsElement>(null);
+  const settingsMenuRef = useRef<HTMLDetailsElement>(null);
+  const taskItemRefs = useRef(new Map<string, HTMLDivElement>());
+  const pendingLayoutRectsRef = useRef<Map<string, DOMRect> | null>(null);
+
+  useEffect(() => {
+    if (!filterMenuOpen && !settingsMenuOpen) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (!filterMenuRef.current?.contains(event.target as Node)) {
+        setFilterMenuOpen(false);
+      }
+      if (!settingsMenuRef.current?.contains(event.target as Node)) {
+        setSettingsMenuOpen(false);
+      }
+    }
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [filterMenuOpen, settingsMenuOpen]);
 
   const toggleCard = useCallback((id: string) => {
     setCollapsedIds((prev) => {
@@ -167,21 +298,74 @@ function App() {
 
   const visibleStories = stories
     .filter((story) => taskListSettings.filterStatus === 'all' || (story.status ?? 'not-started') === taskListSettings.filterStatus)
-    .toSorted((a, b) => {
-      if (taskListSettings.sortBy === 'status') {
-        const statusDelta = STATUS_SORT_ORDER[a.status ?? 'not-started'] - STATUS_SORT_ORDER[b.status ?? 'not-started'];
-        if (statusDelta !== 0) return statusDelta;
-        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-      }
-      const aTime = new Date(a[taskListSettings.sortBy] ?? a.createdAt).getTime();
-      const bTime = new Date(b[taskListSettings.sortBy] ?? b.createdAt).getTime();
-      return taskListSettings.sortBy === 'updatedAt' ? bTime - aTime : aTime - bTime;
-    });
+    .filter((story) => {
+      if (taskListSettings.filterPriority === 'all') return true;
+      if (taskListSettings.filterPriority === 'none') return !story.priority;
+      return story.priority === taskListSettings.filterPriority;
+    })
+    .filter((story) => matchesDateFilter(story, taskListSettings.filterDate));
   const filteredOutCount = stories.length - visibleStories.length;
-  const filterActive = taskListSettings.filterStatus !== 'all';
+  const filterActive = taskListSettings.filterStatus !== 'all' || taskListSettings.filterPriority !== 'all' || taskListSettings.filterDate !== 'all';
   const allCollapsed = visibleStories.length > 0 && visibleStories.every((s) => collapsedIds.has(s.id));
   const outputCountableStories = stories.filter(hasTaskContent);
   const outputShownCount = outputCountableStories.filter((s) => !outputSettings.excludeStatuses.includes(s.status ?? 'not-started')).length;
+  const draggingVisibleIndex = draggingStoryId ? visibleStories.findIndex((story) => story.id === draggingStoryId) : -1;
+
+  function captureTaskLayout() {
+    pendingLayoutRectsRef.current = new Map(
+      visibleStories
+        .map((story) => {
+          const node = taskItemRefs.current.get(story.id);
+          return node ? ([story.id, node.getBoundingClientRect()] as const) : null;
+        })
+        .filter((entry): entry is readonly [string, DOMRect] => Boolean(entry))
+    );
+  }
+
+  useLayoutEffect(() => {
+    const previousRects = pendingLayoutRectsRef.current;
+    if (!previousRects) return;
+    pendingLayoutRectsRef.current = null;
+
+    for (const story of visibleStories) {
+      const node = taskItemRefs.current.get(story.id);
+      const previous = previousRects.get(story.id);
+      if (!node || !previous) continue;
+
+      const next = node.getBoundingClientRect();
+      const deltaX = Math.round(previous.left - next.left);
+      const deltaY = Math.round(previous.top - next.top);
+      if (Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1) continue;
+
+      node.style.willChange = 'transform';
+      const animation = node.animate(
+        [
+          { transform: `translate(${deltaX}px, ${deltaY}px)` },
+          { transform: 'translate(0, 0)' },
+        ],
+        {
+          duration: 240,
+          easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+        }
+      );
+      animation.addEventListener('finish', () => {
+        node.style.transform = '';
+        node.style.willChange = '';
+      }, { once: true });
+      animation.addEventListener('cancel', () => {
+        node.style.transform = '';
+        node.style.willChange = '';
+      }, { once: true });
+    }
+  });
+
+  function isValidDropIndex(index: number): boolean {
+    return draggingVisibleIndex >= 0 && index !== draggingVisibleIndex && index !== draggingVisibleIndex + 1;
+  }
+
+  function setActiveDropIndex(index: number) {
+    setDropIndex(isValidDropIndex(index) ? index : null);
+  }
 
   function getTaskLineage(story: StoryEntry): TaskLineageEntry[] {
     const lineageKey = taskLineageKey(story);
@@ -244,13 +428,82 @@ function App() {
   const [checkpointStatus, setCheckpointStatus] = useState<'idle' | 'saved' | 'skipped'>('idle');
 
   const handleChange = useCallback((id: string, field: keyof StoryEntry, value: string) => {
-    setStories((prev) => prev.map((s) => (s.id === id ? { ...s, [field]: value, updatedAt: new Date().toISOString() } : s)));
+    setStories((prev) => prev.map((s) => (
+      s.id === id
+        ? { ...s, [field]: field === 'priority' && value === '' ? undefined : value, updatedAt: new Date().toISOString() }
+        : s
+    )));
     setErrors((prev) => {
       const copy = { ...prev };
       if (copy[id]) delete copy[id][field];
       return copy;
     });
   }, []);
+
+  async function persistStoryOrder(nextStories: StoryEntry[]) {
+    if (!currentUpdateId) return;
+    const updated = silentSave(currentUpdateId, saveName, nextStories);
+    if (updated) {
+      setHistory(loadSavedUpdates());
+      await syncLinkedFile(currentUpdateId);
+    }
+  }
+
+  function reorderVisibleStories(sourceStories: StoryEntry[], orderedVisibleIds: string[]): StoryEntry[] {
+    const byId = new Map(sourceStories.map((story) => [story.id, story]));
+    const visibleIds = new Set(orderedVisibleIds);
+    const queue = orderedVisibleIds
+      .map((id) => byId.get(id))
+      .filter((story): story is StoryEntry => Boolean(story));
+
+    return sourceStories.map((story) => {
+      if (!visibleIds.has(story.id)) return story;
+      return queue.shift() ?? story;
+    });
+  }
+
+  function handleStoryDropAtIndex(targetIndex: number) {
+    const activeDraggingStoryId = draggingStoryIdRef.current ?? draggingStoryId;
+    if (!activeDraggingStoryId) {
+      setDraggingStoryId(null);
+      setDropIndex(null);
+      return;
+    }
+
+    const orderedVisibleIds = visibleStories.map((story) => story.id);
+    const fromIndex = orderedVisibleIds.indexOf(activeDraggingStoryId);
+    if (fromIndex < 0 || targetIndex === fromIndex || targetIndex === fromIndex + 1) {
+      setDraggingStoryId(null);
+      setDropIndex(null);
+      draggingStoryIdRef.current = null;
+      return;
+    }
+    const adjustedTargetIndex = targetIndex > fromIndex ? targetIndex - 1 : targetIndex;
+    if (adjustedTargetIndex === fromIndex) {
+      setDraggingStoryId(null);
+      setDropIndex(null);
+      draggingStoryIdRef.current = null;
+      return;
+    }
+
+    const [movedId] = orderedVisibleIds.splice(fromIndex, 1);
+    orderedVisibleIds.splice(Math.max(0, Math.min(adjustedTargetIndex, orderedVisibleIds.length)), 0, movedId);
+
+    captureTaskLayout();
+    setStories((prev) => {
+      const next = reorderVisibleStories(prev, orderedVisibleIds).map((story) => (
+        story.id === activeDraggingStoryId ? { ...story, updatedAt: new Date().toISOString() } : story
+      ));
+      void persistStoryOrder(next);
+      return next;
+    });
+    const nextSettings = { ...taskListSettings, sortBy: 'custom' as const };
+    setTaskListSettings(nextSettings);
+    saveTaskListSettings(nextSettings);
+    setDraggingStoryId(null);
+    setDropIndex(null);
+    draggingStoryIdRef.current = null;
+  }
 
   const handleRemove = useCallback((id: string) => {
     setStories((prev) => prev.filter((s) => s.id !== id));
@@ -263,20 +516,21 @@ function App() {
   }, []);
 
   const addStory = () => {
-    const story = makeEmptyStory();
-    setStories((prev) => [...prev, story]);
+    setStories((prev) => [...prev, makeEmptyStory(nextSequenceNumber(prev))]);
   };
 
   function handleCarryOverStories(sourceUpdate: SavedUpdate, selectedStories: StoryEntry[]) {
     setStories((prev) => {
       const existingLineages = new Set(prev.map(taskLineageKey));
       const copies: StoryEntry[] = [];
+      let sequenceNumber = nextSequenceNumber(prev);
 
       for (const story of selectedStories) {
         const lineageKey = taskLineageKey(story);
         if (existingLineages.has(lineageKey)) continue;
         existingLineages.add(lineageKey);
-        copies.push(makeCarryOverStory(story, sourceUpdate));
+        copies.push(makeCarryOverStory(story, sourceUpdate, sequenceNumber));
+        sequenceNumber++;
       }
 
       if (copies.length === 0) return prev;
@@ -741,31 +995,108 @@ function App() {
                 <span className="sr-only">Sort tasks</span>
                 <ArrowUpDown className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                 <select
-                  value={taskListSettings.sortBy}
-                  onChange={(e) => handleTaskListSettingsChange({ ...taskListSettings, sortBy: e.target.value as TaskListSortKey })}
+                  value={taskListSettings.sortBy === 'custom' ? '' : taskListSettings.sortBy}
+                  onChange={(e) => handleSortChange(e.target.value as TaskListSortKey)}
                   className="h-9 rounded-lg border border-gray-200 bg-white pl-8 pr-8 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 appearance-none cursor-pointer"
                 >
+                  <option value="" disabled hidden>Sort Tasks</option>
                   {SORT_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>Sort: {opt.label}</option>
                   ))}
                 </select>
               </label>
-              <label className="relative">
-                <span className="sr-only">Filter tasks by state</span>
-                <Filter className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                <select
-                  value={taskListSettings.filterStatus}
-                  onChange={(e) => handleTaskListSettingsChange({ ...taskListSettings, filterStatus: e.target.value as TaskListSettings['filterStatus'] })}
-                  className="h-9 rounded-lg border border-gray-200 bg-white pl-8 pr-8 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 appearance-none cursor-pointer"
+              {taskListSettings.sortBy === 'custom' && (
+                <span className="flex h-9 items-center rounded-lg border border-indigo-100 bg-indigo-50 px-2.5 text-xs font-semibold text-indigo-700">
+                  Custom order
+                </span>
+              )}
+              <details
+                ref={settingsMenuRef}
+                open={settingsMenuOpen}
+                onToggle={(e) => setSettingsMenuOpen(e.currentTarget.open)}
+                className="relative"
+              >
+                <summary
+                  className="flex h-9 cursor-pointer list-none items-center justify-center rounded-lg border border-gray-200 bg-white px-2.5 text-gray-500 transition-colors hover:bg-gray-50 hover:text-indigo-600 [&::-webkit-details-marker]:hidden"
+                  title="Task list settings"
                 >
-                  {FILTER_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>State: {opt.label}</option>
-                  ))}
-                </select>
-              </label>
+                  <Settings className="w-3.5 h-3.5" />
+                  <span className="sr-only">Task list settings</span>
+                </summary>
+                <div className="absolute right-0 z-20 mt-2 w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
+                  <div className="flex flex-col gap-3">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Display</span>
+                    <label className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                      <span className="text-xs font-semibold text-gray-600">Show task dates</span>
+                      <input
+                        type="checkbox"
+                        checked={taskListSettings.showTaskDates}
+                        onChange={(e) => handleTaskListSettingsChange({ ...taskListSettings, showTaskDates: e.target.checked })}
+                        className="h-3.5 w-3.5 rounded border-gray-300 accent-indigo-600"
+                      />
+                    </label>
+                  </div>
+                </div>
+              </details>
+              <details
+                ref={filterMenuRef}
+                open={filterMenuOpen}
+                onToggle={(e) => setFilterMenuOpen(e.currentTarget.open)}
+                className="relative"
+              >
+                <summary className={`flex h-9 cursor-pointer list-none items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition-colors [&::-webkit-details-marker]:hidden
+                  ${filterActive
+                    ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-indigo-600'}`}
+                >
+                  <Filter className="w-3.5 h-3.5" />
+                  Filters
+                  {filterActive && <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] text-indigo-600">On</span>}
+                </summary>
+                <div className="absolute right-0 z-20 mt-2 w-72 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
+                  <div className="flex flex-col gap-3">
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-gray-400">State</span>
+                      <select
+                        value={taskListSettings.filterStatus}
+                        onChange={(e) => handleTaskListSettingsChange({ ...taskListSettings, filterStatus: e.target.value as TaskListSettings['filterStatus'] })}
+                        className="h-9 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400"
+                      >
+                        {FILTER_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Priority</span>
+                      <select
+                        value={taskListSettings.filterPriority}
+                        onChange={(e) => handleTaskListSettingsChange({ ...taskListSettings, filterPriority: e.target.value as TaskListSettings['filterPriority'] })}
+                        className="h-9 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400"
+                      >
+                        {PRIORITY_FILTER_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Date</span>
+                      <select
+                        value={taskListSettings.filterDate}
+                        onChange={(e) => handleTaskListSettingsChange({ ...taskListSettings, filterDate: e.target.value as TaskListSettings['filterDate'] })}
+                        className="h-9 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400"
+                      >
+                        {DATE_FILTER_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </div>
+              </details>
               {filterActive && (
                 <button
-                  onClick={() => handleTaskListSettingsChange({ ...taskListSettings, filterStatus: 'all' })}
+                  onClick={() => handleTaskListSettingsChange({ ...taskListSettings, filterStatus: 'all', filterPriority: 'all', filterDate: 'all' })}
                   className="flex h-9 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-semibold text-gray-500 hover:bg-gray-50 hover:text-indigo-600 transition-colors"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -784,21 +1115,57 @@ function App() {
             </button>
           )}
         </div>
-        <div className="flex flex-col gap-3 mb-5">
+        <div className="flex flex-col mb-5">
           {visibleStories.map((story, idx) => (
-            <StoryCard
+            <div
               key={story.id}
-              story={story}
-              index={idx}
-              total={stories.length}
-              collapsed={collapsedIds.has(story.id)}
-              onToggleCollapse={toggleCard}
-              errors={errors[story.id] ?? {}}
-              onChange={handleChange}
-              onRemove={handleRemove}
-              lineage={getTaskLineage(story)}
-            />
+              ref={(node) => {
+                if (node) taskItemRefs.current.set(story.id, node);
+                else taskItemRefs.current.delete(story.id);
+              }}
+            >
+              <DropSlot
+                active={draggingStoryId !== null && dropIndex === idx && isValidDropIndex(idx)}
+                onDragOver={() => setActiveDropIndex(idx)}
+                onDrop={() => handleStoryDropAtIndex(idx)}
+              />
+              <div className={idx < visibleStories.length - 1 ? 'mb-3' : ''}>
+                <StoryCard
+                  story={story}
+                  index={idx}
+                  total={stories.length}
+                  collapsed={collapsedIds.has(story.id)}
+                  onToggleCollapse={toggleCard}
+                  errors={errors[story.id] ?? {}}
+                  onChange={handleChange}
+                  onRemove={handleRemove}
+                  lineage={getTaskLineage(story)}
+                  showDates={taskListSettings.showTaskDates}
+                  draggable
+                  dragging={draggingStoryId === story.id}
+                  onDragStart={(id) => {
+                    setDraggingStoryId(id);
+                    draggingStoryIdRef.current = id;
+                    setDropIndex(null);
+                  }}
+                  onDragEnd={() => {
+                    setDraggingStoryId(null);
+                    setDropIndex(null);
+                    draggingStoryIdRef.current = null;
+                  }}
+                  onDragOverTarget={() => setActiveDropIndex(idx)}
+                  onDrop={() => handleStoryDropAtIndex(idx)}
+                />
+              </div>
+            </div>
           ))}
+          {visibleStories.length > 0 && (
+            <DropSlot
+              active={draggingStoryId !== null && dropIndex === visibleStories.length && isValidDropIndex(visibleStories.length)}
+              onDragOver={() => setActiveDropIndex(visibleStories.length)}
+              onDrop={() => handleStoryDropAtIndex(visibleStories.length)}
+            />
+          )}
         </div>
 
         {/* Add story */}

@@ -1,8 +1,8 @@
 
 import { useState } from 'react';
 import { X, GripVertical, ChevronDown, ChevronUp, History } from 'lucide-react';
-import type { StoryEntry, StoryStatus, TaskLineageEntry, TaskType } from '../types';
-import { TASK_TYPE_LABELS } from '../utils';
+import type { StoryEntry, StoryPriority, StoryStatus, TaskLineageEntry, TaskType } from '../types';
+import { statusDotClass, TASK_PRIORITY_LABELS, TASK_TYPE_LABELS } from '../utils';
 
 interface StoryCardProps {
   story: StoryEntry;
@@ -14,6 +14,13 @@ interface StoryCardProps {
   onChange: (id: string, field: keyof StoryEntry, value: string) => void;
   onRemove: (id: string) => void;
   lineage?: TaskLineageEntry[];
+  showDates?: boolean;
+  draggable?: boolean;
+  dragging?: boolean;
+  onDragStart?: (id: string) => void;
+  onDragEnd?: () => void;
+  onDragOverTarget?: () => void;
+  onDrop?: () => void;
 }
 
 const STATUS_OPTIONS: { value: StoryStatus; label: string; dot: string }[] = [
@@ -37,9 +44,17 @@ const TASK_TYPE_OPTIONS: { value: TaskType; label: string }[] = [
   { value: 'bug',   label: 'Bug' },
 ];
 
-export function statusDotClass(status: StoryStatus): string {
-  return STATUS_OPTIONS.find((o) => o.value === status)?.dot ?? 'bg-gray-400';
-}
+const PRIORITY_OPTIONS: { value: StoryPriority; label: string }[] = [
+  { value: 'low', label: TASK_PRIORITY_LABELS.low },
+  { value: 'medium', label: TASK_PRIORITY_LABELS.medium },
+  { value: 'high', label: TASK_PRIORITY_LABELS.high },
+];
+
+const PRIORITY_SELECT_CLASS: Record<StoryPriority, string> = {
+  low: 'text-sky-600',
+  medium: 'text-amber-600',
+  high: 'text-red-600',
+};
 
 const selectBase = 'w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 focus:bg-white transition-colors appearance-none cursor-pointer';
 
@@ -49,12 +64,21 @@ function formatDate(iso: string) {
   });
 }
 
-export default function StoryCard({ story, index, total, collapsed, onToggleCollapse, errors, onChange, onRemove, lineage = [] }: StoryCardProps) {
+function formatHeaderDate(iso: string) {
+  return new Date(iso).toLocaleString(undefined, {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+  });
+}
+
+export default function StoryCard({ story, index, total, collapsed, onToggleCollapse, errors, onChange, onRemove, lineage = [], showDates = true, draggable = false, dragging = false, onDragStart, onDragEnd, onDragOverTarget, onDrop }: StoryCardProps) {
   const [lineageOpen, setLineageOpen] = useState(false);
   const status: StoryStatus = story.status ?? 'not-started';
   const taskType: TaskType = story.taskType ?? 'task';
+  const priority = story.priority;
   const typeLabel = TASK_TYPE_LABELS[taskType];
-  const summaryLabel = story.title.trim() || `${typeLabel} ${index + 1}`;
+  const labelNumber = story.sequenceNumber ?? index + 1;
+  const summaryLabel = story.title.trim() || `${typeLabel} ${labelNumber}`;
+  const fullTitle = story.title.trim() || summaryLabel;
   const hasErrors = Object.keys(errors).length > 0;
   const activeDot = statusDotClass(status);
   const hasLineage = story.carryOver || lineage.length > 1;
@@ -125,19 +149,72 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
   );
 
   return (
-    <div className={`bg-white border rounded-xl shadow-sm overflow-hidden transition-all ${hasErrors ? 'border-red-300' : 'border-gray-200'}`}>
+    <div
+      className={`bg-white border rounded-xl shadow-sm overflow-hidden transition-all ${dragging ? 'opacity-60 ring-2 ring-indigo-200' : ''} ${hasErrors ? 'border-red-300' : 'border-gray-200'}`}
+      onDragOver={(e) => {
+        if (!draggable) return;
+        e.preventDefault();
+        onDragOverTarget?.();
+      }}
+      onDrop={(e) => {
+        if (!draggable) return;
+        e.preventDefault();
+        onDrop?.();
+      }}
+    >
       {/* Card header */}
       <div
         className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200 cursor-pointer select-none hover:bg-gray-100 transition-colors"
         onClick={() => onToggleCollapse(story.id)}
+        title={fullTitle}
       >
-        <div className="flex items-center gap-2 min-w-0">
-          <GripVertical className="w-4 h-4 text-gray-300 shrink-0" />
+        <div className="flex items-center gap-2 min-w-0 flex-wrap">
+          <button
+            type="button"
+            draggable={draggable}
+            onClick={(e) => e.stopPropagation()}
+            onDragStart={(e) => {
+              e.stopPropagation();
+              e.dataTransfer.effectAllowed = 'move';
+              e.dataTransfer.setData('text/plain', story.id);
+              onDragStart?.(story.id);
+            }}
+            onDragEnd={(e) => {
+              e.stopPropagation();
+              onDragEnd?.();
+            }}
+            className={`rounded p-0.5 transition-colors ${draggable ? 'cursor-grab text-gray-400 hover:bg-indigo-50 hover:text-indigo-500 active:cursor-grabbing' : 'cursor-not-allowed text-gray-300'}`}
+            title={draggable ? 'Drag to reorder' : 'Drag unavailable'}
+            aria-label={draggable ? 'Drag to reorder task' : 'Task drag handle disabled'}
+          >
+            <GripVertical className="w-4 h-4 shrink-0" />
+          </button>
           <span className="text-xs font-bold uppercase tracking-widest text-indigo-500 shrink-0">
-            {typeLabel} {index + 1}
+            {typeLabel} {labelNumber}
           </span>
           {/* Status dot — always visible */}
           <span className={`w-2 h-2 rounded-full shrink-0 ${activeDot}`} title={STATUS_OPTIONS.find(o => o.value === status)?.label} />
+          {priority && (
+            <span className="text-[10px] font-bold uppercase tracking-wide text-gray-500 bg-white border border-gray-200 px-1.5 py-0.5 rounded shrink-0">
+              {TASK_PRIORITY_LABELS[priority]}
+            </span>
+          )}
+          {showDates && (
+            <>
+              <span
+                className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 bg-white border border-gray-200 px-1.5 py-0.5 rounded shrink-0"
+                title={`Created ${formatDate(story.createdAt)}`}
+              >
+                Created {formatHeaderDate(story.createdAt)}
+              </span>
+              <span
+                className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 bg-white border border-gray-200 px-1.5 py-0.5 rounded shrink-0"
+                title={`Modified ${formatDate(story.updatedAt ?? story.createdAt)}`}
+              >
+                Modified {formatHeaderDate(story.updatedAt ?? story.createdAt)}
+              </span>
+            </>
+          )}
           {collapsed && (
             <span className="text-xs text-gray-500 truncate ml-0.5">— {summaryLabel}</span>
           )}
@@ -178,8 +255,8 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
             </div>
           )}
 
-          {/* Type + Status row */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Type + Status + Priority row */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {/* Task type dropdown */}
             <div className="flex flex-col gap-1">
               <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Type</label>
@@ -207,6 +284,27 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
                   className={`${selectBase} pr-8 font-semibold ${STATUS_SELECT_CLASS[status]}`}
                 >
                   {STATUS_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+              </div>
+            </div>
+
+            {/* Priority dropdown */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                Priority
+                <span className="text-gray-400 font-normal ml-1 normal-case">(optional)</span>
+              </label>
+              <div className="relative">
+                <select
+                  value={priority ?? ''}
+                  onChange={(e) => onChange(story.id, 'priority', e.target.value)}
+                  className={`${selectBase} pr-8 font-semibold ${priority ? PRIORITY_SELECT_CLASS[priority] : 'text-gray-500'}`}
+                >
+                  <option value="">No priority</option>
+                  {PRIORITY_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </select>

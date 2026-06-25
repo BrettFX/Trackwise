@@ -1,5 +1,6 @@
 export type TaskType = 'task' | 'story' | 'spike' | 'bug';
 export type StoryStatus = 'not-started' | 'in-progress' | 'done' | 'blocked';
+export type StoryPriority = 'low' | 'medium' | 'high';
 
 export interface OutputSettings {
   showStatus: boolean;
@@ -8,6 +9,7 @@ export interface OutputSettings {
 
 export interface StoryEntry {
   id: string;
+  sequenceNumber?: number;
   taskType: TaskType;
   title: string;
   ticketNumber: string;
@@ -16,6 +18,7 @@ export interface StoryEntry {
   today: string;
   blockers: string;
   status: StoryStatus;
+  priority?: StoryPriority;
   createdAt: string;
   updatedAt: string;
   carryOver?: CarryOverInfo;
@@ -45,11 +48,15 @@ export interface SavedUpdate {
   changelog: UpdateSnapshot[]; // ordered oldest → newest
 }
 
-export type TaskListSortKey = 'createdAt' | 'updatedAt' | 'status';
+export type TaskListSortKey = 'createdAt' | 'updatedAt' | 'status' | 'priority';
+export type TaskListSortSelection = TaskListSortKey | 'custom';
 
 export interface TaskListSettings {
-  sortBy: TaskListSortKey;
+  sortBy: TaskListSortSelection;
   filterStatus: StoryStatus | 'all';
+  filterPriority: StoryPriority | 'none' | 'all';
+  filterDate: 'all' | 'created-today' | 'updated-today' | 'created-week' | 'updated-week';
+  showTaskDates: boolean;
 }
 
 export interface TaskLineageEntry {

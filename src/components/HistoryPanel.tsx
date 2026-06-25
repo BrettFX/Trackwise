@@ -1,8 +1,7 @@
 import { useState, useRef } from 'react';
 import { Trash2, RotateCcw, ChevronDown, ChevronUp, Clock, History, Download, Upload, Pencil, Check, X, Link2, CopyPlus } from 'lucide-react';
 import type { SavedUpdate, StoryEntry, StoryStatus, TaskType } from '../types';
-import { statusDotClass } from './StoryCard';
-import { TASK_TYPE_LABELS } from '../utils';
+import { statusDotClass, TASK_TYPE_LABELS } from '../utils';
 
 interface HistoryPanelProps {
   history: SavedUpdate[];

@@ -1,4 +1,4 @@
-import type { StoryEntry, SavedUpdate, UpdateSnapshot, StoryStatus, TaskType, OutputSettings, TaskListSettings } from './types';
+import type { StoryEntry, SavedUpdate, UpdateSnapshot, StoryStatus, StoryPriority, TaskType, OutputSettings, TaskListSettings } from './types';
 
 const STORAGE_KEY = 'ytb-saved-updates';
 const OUTPUT_SETTINGS_KEY = 'trackwise-output-settings';
@@ -13,6 +13,9 @@ export const DEFAULT_OUTPUT_SETTINGS: OutputSettings = {
 export const DEFAULT_TASK_LIST_SETTINGS: TaskListSettings = {
   sortBy: 'createdAt',
   filterStatus: 'all',
+  filterPriority: 'all',
+  filterDate: 'all',
+  showTaskDates: true,
 };
 
 export function loadOutputSettings(): OutputSettings {
@@ -34,9 +37,29 @@ export function loadTaskListSettings(): TaskListSettings {
     const raw = sessionStorage.getItem(TASK_LIST_SETTINGS_KEY);
     if (!raw) return { ...DEFAULT_TASK_LIST_SETTINGS };
     const parsed = JSON.parse(raw) as Partial<TaskListSettings>;
-    const sortBy = parsed.sortBy === 'updatedAt' || parsed.sortBy === 'status' ? parsed.sortBy : DEFAULT_TASK_LIST_SETTINGS.sortBy;
+    const sortBy =
+      parsed.sortBy === 'custom' ||
+      parsed.sortBy === 'updatedAt' ||
+      parsed.sortBy === 'status' ||
+      parsed.sortBy === 'priority'
+        ? parsed.sortBy
+        : DEFAULT_TASK_LIST_SETTINGS.sortBy;
     const filterStatus = isStoryStatus(parsed.filterStatus) ? parsed.filterStatus : DEFAULT_TASK_LIST_SETTINGS.filterStatus;
-    return { sortBy, filterStatus };
+    const filterPriority =
+      parsed.filterPriority === 'all' || parsed.filterPriority === 'none' || isStoryPriority(parsed.filterPriority)
+        ? parsed.filterPriority
+        : DEFAULT_TASK_LIST_SETTINGS.filterPriority;
+    const filterDate =
+      parsed.filterDate === 'created-today' ||
+      parsed.filterDate === 'updated-today' ||
+      parsed.filterDate === 'created-week' ||
+      parsed.filterDate === 'updated-week'
+        ? parsed.filterDate
+        : DEFAULT_TASK_LIST_SETTINGS.filterDate;
+    const showTaskDates = typeof parsed.showTaskDates === 'boolean'
+      ? parsed.showTaskDates
+      : DEFAULT_TASK_LIST_SETTINGS.showTaskDates;
+    return { sortBy, filterStatus, filterPriority, filterDate, showTaskDates };
   } catch {
     return { ...DEFAULT_TASK_LIST_SETTINGS };
   }
@@ -66,6 +89,10 @@ function isStoryStatus(value: unknown): value is StoryStatus {
   return value === 'not-started' || value === 'in-progress' || value === 'done' || value === 'blocked';
 }
 
+function isStoryPriority(value: unknown): value is StoryPriority {
+  return value === 'low' || value === 'medium' || value === 'high';
+}
+
 function newestCheckpointDate(update: SavedUpdate): string | undefined {
   return update.changelog?.reduce<string | undefined>((latest, snap) => {
     if (!latest || new Date(snap.savedAt).getTime() > new Date(latest).getTime()) return snap.savedAt;
@@ -73,8 +100,11 @@ function newestCheckpointDate(update: SavedUpdate): string | undefined {
   }, undefined);
 }
 
-function normalizeStory(story: StoryEntry, fallbackDate: string): StoryEntry {
+function normalizeStory(story: StoryEntry, fallbackDate: string, fallbackSequenceNumber: number): StoryEntry {
   const createdAt = story.createdAt ?? fallbackDate;
+  const sequenceNumber = Number.isFinite(story.sequenceNumber) && story.sequenceNumber && story.sequenceNumber > 0
+    ? story.sequenceNumber
+    : fallbackSequenceNumber;
   const carryOver = story.carryOver
     ? {
         ...story.carryOver,
@@ -85,8 +115,10 @@ function normalizeStory(story: StoryEntry, fallbackDate: string): StoryEntry {
     : undefined;
   return {
     ...story,
+    sequenceNumber,
     status: story.status ?? 'not-started',
     taskType: story.taskType ?? 'task',
+    priority: isStoryPriority(story.priority) ? story.priority : undefined,
     createdAt,
     updatedAt: story.updatedAt ?? createdAt,
     carryOver,
@@ -101,9 +133,9 @@ function normalizeUpdate(update: SavedUpdate): SavedUpdate {
     updatedAt,
     changelog: changelog.map((snap) => ({
       ...snap,
-      stories: snap.stories.map((s) => normalizeStory(s, snap.savedAt)),
+      stories: snap.stories.map((s, idx) => normalizeStory(s, snap.savedAt, idx + 1)),
     })),
-    stories: update.stories.map((s) => normalizeStory(s, update.createdAt)),
+    stories: update.stories.map((s, idx) => normalizeStory(s, update.createdAt, idx + 1)),
   };
 }
 
@@ -170,6 +202,7 @@ function contentFingerprint(stories: StoryEntry[]): string {
       today: s.today.trim(),
       blockers: s.blockers.trim(),
       status: s.status,
+      priority: s.priority,
     }))
   );
 }
@@ -453,11 +486,34 @@ const STATUS_LABELS: Record<StoryStatus, string> = {
   'blocked': 'Blocked',
 };
 
+const STATUS_DOT_CLASSES: Record<StoryStatus, string> = {
+  'not-started': 'bg-gray-400',
+  'in-progress': 'bg-indigo-500',
+  done: 'bg-emerald-500',
+  blocked: 'bg-red-500',
+};
+
+export function statusDotClass(status: StoryStatus): string {
+  return STATUS_DOT_CLASSES[status] ?? 'bg-gray-400';
+}
+
 export const TASK_TYPE_LABELS: Record<TaskType, string> = {
   task: 'Task',
   story: 'Story',
   spike: 'Spike',
   bug: 'Bug',
+};
+
+export const TASK_PRIORITY_LABELS: Record<StoryPriority, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+};
+
+export const TASK_PRIORITY_SCORES: Record<StoryPriority, number> = {
+  low: 1,
+  medium: 2,
+  high: 3,
 };
 
 export function formatOutputHTML(stories: StoryEntry[], settings: OutputSettings = DEFAULT_OUTPUT_SETTINGS): string {
@@ -482,10 +538,12 @@ export function formatOutputHTML(stories: StoryEntry[], settings: OutputSettings
     }
 
     const status = story.status ?? 'not-started';
+    const priority = story.priority;
 
     return [
       `<p>${storyLine}</p>`,
       ...(settings.showStatus ? [`<p><b>Status:</b> ${STATUS_LABELS[status]}</p>`] : []),
+      ...(priority ? [`<p><b>Priority:</b> ${TASK_PRIORITY_LABELS[priority]}</p>`] : []),
       `<p><b>Yesterday:</b> ${toHtmlLines(story.yesterday.trim() || 'None')}</p>`,
       `<p><b>Today:</b> ${toHtmlLines(story.today.trim())}</p>`,
       `<p><b>Blockers:</b> ${toHtmlLines(story.blockers.trim() || 'None')}</p>`,
@@ -495,10 +553,11 @@ export function formatOutputHTML(stories: StoryEntry[], settings: OutputSettings
   return blocks.join('\n<hr>\n');
 }
 
-export function makeEmptyStory(): StoryEntry {
+export function makeEmptyStory(sequenceNumber = 1): StoryEntry {
   const now = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
+    sequenceNumber,
     taskType: 'task',
     title: '',
     ticketNumber: '',
@@ -507,6 +566,7 @@ export function makeEmptyStory(): StoryEntry {
     today: '',
     blockers: '',
     status: 'not-started',
+    priority: undefined,
     createdAt: now,
     updatedAt: now,
   };
