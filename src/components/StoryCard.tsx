@@ -216,7 +216,7 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
             </>
           )}
           {collapsed && (
-            <span className="text-xs text-gray-500 truncate ml-0.5">— {summaryLabel}</span>
+            <span className="text-xs text-gray-500 truncate ml-0.5"> {summaryLabel}</span>
           )}
           {hasErrors && collapsed && (
             <span className="text-xs text-red-400 font-semibold ml-1 shrink-0">⚠ incomplete</span>
@@ -316,7 +316,7 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
           {field('title', 'Title', true, 'e.g. Implement Glue ETL for CUR 2.0 Cost Insights')}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {field('jiraUrl', 'Jira URL', false, 'https://jira.faa.gov/browse/…', false, 'Paste URL to auto-fill Ticket # — or enter Ticket # to auto-fill URL')}
+            {field('jiraUrl', 'Jira URL', false, 'https://jira.faa.gov/browse/…', false, 'Paste URL to auto-fill Ticket #  or enter Ticket # to auto-fill URL')}
             {field('ticketNumber', 'Jira Ticket #', false, 'e.g. FCSCCE-9124', false)}
           </div>
 
@@ -349,7 +349,7 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
                         {entry.checkpoint && <span className="text-indigo-500 font-medium">checkpoint</span>}
                         {entry.note && <span className="text-indigo-600 italic">"{entry.note}"</span>}
                       </div>
-                      <p><span className="font-medium text-gray-500">Today:</span> {entry.today.trim() || '—'}</p>
+                      <p><span className="font-medium text-gray-500">Today:</span> {entry.today.trim() || 'None'}</p>
                       <p><span className="font-medium text-gray-500">Blockers:</span> {entry.blockers.trim() || 'None'}</p>
                     </div>
                   ))}
