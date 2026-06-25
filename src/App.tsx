@@ -20,8 +20,8 @@ const STATUS_LABELS: Record<StoryStatus, string> = {
 };
 
 const STATUS_SORT_ORDER: Record<StoryStatus, number> = {
-  'in-progress': 0,
-  blocked: 1,
+  blocked: 0,
+  'in-progress': 1,
   'not-started': 2,
   done: 3,
 };
@@ -232,17 +232,28 @@ function App() {
     saveTaskListSettings(next);
   }
 
+  function storyMatchesTaskListFilters(story: StoryEntry, settings = taskListSettings): boolean {
+    const statusMatches = settings.filterStatus === 'all' || (story.status ?? 'not-started') === settings.filterStatus;
+    const priorityMatches =
+      settings.filterPriority === 'all' ||
+      (settings.filterPriority === 'none' ? !story.priority : story.priority === settings.filterPriority);
+    return statusMatches && priorityMatches && matchesDateFilter(story, settings.filterDate);
+  }
+
+  function applyVisibleSort(sourceStories: StoryEntry[], sortBy: TaskListSortKey): StoryEntry[] {
+    const order = new Map(sourceStories.map((story, idx) => [story.id, idx]));
+    const sortedVisibleIds = sortStoriesBy(
+      sourceStories.filter((story) => storyMatchesTaskListFilters(story)),
+      sortBy,
+      order
+    ).map((story) => story.id);
+    return reorderVisibleStories(sourceStories, sortedVisibleIds);
+  }
+
   function handleSortChange(sortBy: TaskListSortKey) {
     captureTaskLayout();
     setStories((prev) => {
-      const order = new Map(prev.map((story, idx) => [story.id, idx]));
-      const visibleIds = new Set(visibleStories.map((story) => story.id));
-      const sortedVisibleIds = sortStoriesBy(
-        prev.filter((story) => visibleIds.has(story.id)),
-        sortBy,
-        order
-      ).map((story) => story.id);
-      const reordered = reorderVisibleStories(prev, sortedVisibleIds);
+      const reordered = applyVisibleSort(prev, sortBy);
       void persistStoryOrder(reordered);
       return reordered;
     });
@@ -427,18 +438,24 @@ function App() {
   const [checkpointNote, setCheckpointNote] = useState('');
   const [checkpointStatus, setCheckpointStatus] = useState<'idle' | 'saved' | 'skipped'>('idle');
 
-  const handleChange = useCallback((id: string, field: keyof StoryEntry, value: string) => {
-    setStories((prev) => prev.map((s) => (
-      s.id === id
-        ? { ...s, [field]: field === 'priority' && value === '' ? undefined : value, updatedAt: new Date().toISOString() }
-        : s
-    )));
+  function handleChange(id: string, field: keyof StoryEntry, value: string) {
+    if (taskListSettings.sortBy !== 'custom') captureTaskLayout();
+    setStories((prev) => {
+      const updated = prev.map((s) => (
+        s.id === id
+          ? { ...s, [field]: field === 'priority' && value === '' ? undefined : value, updatedAt: new Date().toISOString() }
+          : s
+      ));
+      return taskListSettings.sortBy === 'custom'
+        ? updated
+        : applyVisibleSort(updated, taskListSettings.sortBy);
+    });
     setErrors((prev) => {
       const copy = { ...prev };
       if (copy[id]) delete copy[id][field];
       return copy;
     });
-  }, []);
+  }
 
   async function persistStoryOrder(nextStories: StoryEntry[]) {
     if (!currentUpdateId) return;
