@@ -707,6 +707,7 @@ function App() {
           onExport={handleExport}
           onImport={openImport}
           onCarryOverStories={handleCarryOverStories}
+          currentUpdateId={currentUpdateId}
           linkedFileNames={linkedFileNames}
         />
         </div>
