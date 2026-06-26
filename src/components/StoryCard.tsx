@@ -102,6 +102,11 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
     if (extracted) onChange(story.id, 'ticketNumber', extracted);
   }
 
+  const sortedLineage = [...lineage].sort((a, b) => {
+    // Need to convert the savedAt date timestamp to an actual date for comparison purposes
+    return new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime();
+  });
+
   const field = (
     id: keyof StoryEntry,
     label: string,
@@ -340,7 +345,7 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
                   {lineage.length === 0 && story.carryOver && (
                     <p className="text-xs text-gray-500">Carried over from {story.carryOver.sourceUpdateName}.</p>
                   )}
-                  {lineage.map((entry) => (
+                  {sortedLineage.map((entry) => (
                     <div key={entry.id} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
                       <div className="flex items-center gap-1.5 flex-wrap mb-1">
                         <span className={`w-2 h-2 rounded-full shrink-0 ${statusDotClass(entry.status)}`} />
