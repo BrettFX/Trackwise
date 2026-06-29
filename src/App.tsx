@@ -8,7 +8,7 @@ import VersionInfo from './components/VersionInfo';
 import OutputSettingsPanel from './components/OutputSettingsPanel';
 import NavPanel from './components/NavPanel';
 import type { StoryEntry, SavedUpdate, StoryStatus, TaskLineageEntry, TaskListSettings, TaskListSortKey } from './types';
-import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, renameUpdate, exportUpdates, exportSingleUpdate, hasUnsavedChanges, loadOutputSettings, saveOutputSettings, loadTaskListSettings, saveTaskListSettings, loadCollapsedTaskIds, saveCollapsedTaskIds, TASK_PRIORITY_LABELS, TASK_PRIORITY_SCORES } from './utils';
+import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, deleteCheckpoint, deleteCheckpoints, renameUpdate, exportUpdates, exportSingleUpdate, hasUnsavedChanges, loadOutputSettings, saveOutputSettings, loadTaskListSettings, saveTaskListSettings, loadCollapsedTaskIds, saveCollapsedTaskIds, TASK_PRIORITY_LABELS, TASK_PRIORITY_SCORES } from './utils';
 import { storeFileHandle, getHandleForEntry, getAllLinkedFiles, writeEntriesToHandle, removeHandlesForEntries, isFileSystemSaveSupported } from './fileHandleStore';
 import type { OutputSettings } from './types';
 
@@ -678,6 +678,16 @@ function App() {
     removeHandlesForEntries([id]).then(() => refreshLinkedFileNames());
   }
 
+  function handleDeleteLineageEntry(updateId: string, savedAt: string) {
+    deleteCheckpoint(updateId, savedAt);
+    setHistory(loadSavedUpdates());
+  }
+
+  function handleDeleteLineageEntries(entries: { updateId: string; savedAt: string }[]) {
+    deleteCheckpoints(entries);
+    setHistory(loadSavedUpdates());
+  }
+
   function handleRename(id: string, newName: string) {
     renameUpdate(id, newName);
     setHistory(loadSavedUpdates());
@@ -1157,6 +1167,8 @@ function App() {
                   onChange={handleChange}
                   onRemove={handleRemove}
                   lineage={getTaskLineage(story)}
+                  onDeleteLineageEntry={handleDeleteLineageEntry}
+                  onDeleteLineageEntries={handleDeleteLineageEntries}
                   showDates={taskListSettings.showTaskDates}
                   draggable
                   dragging={draggingStoryId === story.id}

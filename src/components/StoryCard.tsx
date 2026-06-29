@@ -1,6 +1,6 @@
 
 import { useState } from 'react';
-import { X, GripVertical, ChevronDown, ChevronUp, History } from 'lucide-react';
+import { X, GripVertical, ChevronDown, ChevronUp, History, Trash2, CheckSquare } from 'lucide-react';
 import type { StoryEntry, StoryPriority, StoryStatus, TaskLineageEntry, TaskType } from '../types';
 import { statusDotClass, TASK_PRIORITY_LABELS, TASK_TYPE_LABELS } from '../utils';
 
@@ -21,6 +21,8 @@ interface StoryCardProps {
   onDragEnd?: () => void;
   onDragOverTarget?: () => void;
   onDrop?: () => void;
+  onDeleteLineageEntry?: (updateId: string, savedAt: string) => void;
+  onDeleteLineageEntries?: (entries: { updateId: string; savedAt: string }[]) => void;
 }
 
 const STATUS_OPTIONS: { value: StoryStatus; label: string; dot: string }[] = [
@@ -70,8 +72,12 @@ function formatHeaderDate(iso: string) {
   });
 }
 
-export default function StoryCard({ story, index, total, collapsed, onToggleCollapse, errors, onChange, onRemove, lineage = [], showDates = true, draggable = false, dragging = false, onDragStart, onDragEnd, onDragOverTarget, onDrop }: StoryCardProps) {
+export default function StoryCard({ story, index, total, collapsed, onToggleCollapse, errors, onChange, onRemove, lineage = [], showDates = true, draggable = false, dragging = false, onDragStart, onDragEnd, onDragOverTarget, onDrop, onDeleteLineageEntry, onDeleteLineageEntries }: StoryCardProps) {
   const [lineageOpen, setLineageOpen] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState<'single' | 'selected' | 'all' | null>(null);
+  const [pendingSingle, setPendingSingle] = useState<{ updateId: string; savedAt: string } | null>(null);
   const status: StoryStatus = story.status ?? 'not-started';
   const taskType: TaskType = story.taskType ?? 'task';
   const priority = story.priority;
@@ -331,35 +337,185 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
 
           {hasLineage && (
             <div className="border-t border-gray-100 pt-3">
-              <button
-                onClick={() => setLineageOpen((o) => !o)}
-                className="flex items-center gap-1.5 text-xs font-semibold text-indigo-500 hover:text-indigo-700 transition-colors"
-              >
-                <History className="w-3.5 h-3.5" />
-                {lineageOpen ? 'Hide' : 'View'} task lineage
-                {lineage.length > 0 ? ` (${lineage.length})` : ''}
-                {lineageOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-              </button>
+              {/* Lineage header row */}
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  onClick={() => {
+                    setLineageOpen((o) => !o);
+                    if (lineageOpen) { setSelectMode(false); setSelectedIds(new Set()); }
+                  }}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-indigo-500 hover:text-indigo-700 transition-colors"
+                >
+                  <History className="w-3.5 h-3.5" />
+                  {lineageOpen ? 'Hide' : 'View'} task lineage
+                  {lineage.length > 0 ? ` (${lineage.length})` : ''}
+                  {lineageOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                </button>
+                {lineageOpen && sortedLineage.some((e) => e.checkpoint) && (
+                  <div className="flex items-center gap-2">
+                    {!selectMode ? (
+                      <>
+                        <button
+                          onClick={() => { setSelectMode(true); setSelectedIds(new Set()); }}
+                          className="flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-500 transition-colors"
+                          title="Select items to delete"
+                        >
+                          <CheckSquare className="w-3.5 h-3.5" />
+                          Select
+                        </button>
+                        <button
+                          onClick={() => setConfirmDelete('all')}
+                          className="flex items-center gap-1 text-xs text-gray-400 hover:text-red-500 transition-colors"
+                          title="Clear all checkpoint entries"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Clear all
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => {
+                            const allIds = new Set(sortedLineage.filter((e) => e.checkpoint).map((e) => e.id));
+                            setSelectedIds((prev) => prev.size === allIds.size ? new Set() : allIds);
+                          }}
+                          className="text-xs text-gray-400 hover:text-indigo-500 transition-colors"
+                        >
+                          {selectedIds.size === sortedLineage.filter((e) => e.checkpoint).length ? 'Deselect all' : 'Select all'}
+                        </button>
+                        {selectedIds.size > 0 && (
+                          <button
+                            onClick={() => setConfirmDelete('selected')}
+                            className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 font-semibold transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Delete ({selectedIds.size})
+                          </button>
+                        )}
+                        <button
+                          onClick={() => { setSelectMode(false); setSelectedIds(new Set()); }}
+                          className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {lineageOpen && (
                 <div className="mt-3 flex flex-col gap-2">
                   {lineage.length === 0 && story.carryOver && (
                     <p className="text-xs text-gray-500">Carried over from {story.carryOver.sourceUpdateName}.</p>
                   )}
-                  {sortedLineage.map((entry) => (
-                    <div key={entry.id} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
-                      <div className="flex items-center gap-1.5 flex-wrap mb-1">
-                        <span className={`w-2 h-2 rounded-full shrink-0 ${statusDotClass(entry.status)}`} />
-                        <span className="font-semibold text-gray-700">{entry.updateName}</span>
-                        <span className="text-gray-400">{formatDate(entry.savedAt)}</span>
-                        {entry.checkpoint && <span className="text-indigo-500 font-medium">checkpoint</span>}
-                        {entry.note && <span className="text-indigo-600 italic">"{entry.note}"</span>}
+                  {sortedLineage.map((entry) => {
+                    const isSelected = selectedIds.has(entry.id);
+                    return (
+                      <div
+                        key={entry.id}
+                        className={`rounded-lg border px-3 py-2 text-xs text-gray-600 transition-colors ${
+                          selectMode && entry.checkpoint
+                            ? isSelected
+                              ? 'border-indigo-300 bg-indigo-50 cursor-pointer'
+                              : 'border-gray-200 bg-gray-50 cursor-pointer hover:border-indigo-200'
+                            : 'border-gray-200 bg-gray-50'
+                        }`}
+                        onClick={() => {
+                          if (!selectMode || !entry.checkpoint) return;
+                          setSelectedIds((prev) => {
+                            const next = new Set(prev);
+                            next.has(entry.id) ? next.delete(entry.id) : next.add(entry.id);
+                            return next;
+                          });
+                        }}
+                      >
+                        <div className="flex items-start justify-between gap-1.5 mb-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {selectMode && entry.checkpoint && (
+                              <span className={`w-3.5 h-3.5 rounded border shrink-0 flex items-center justify-center ${isSelected ? 'bg-indigo-500 border-indigo-500' : 'border-gray-300 bg-white'}`}>
+                                {isSelected && <span className="text-white text-[9px] font-bold leading-none">✓</span>}
+                              </span>
+                            )}
+                            <span className={`w-2 h-2 rounded-full shrink-0 ${statusDotClass(entry.status)}`} />
+                            <span className="font-semibold text-gray-700">{entry.updateName}</span>
+                            <span className="text-gray-400">{formatDate(entry.savedAt)}</span>
+                            {entry.checkpoint && <span className="text-indigo-500 font-medium">checkpoint</span>}
+                            {entry.note && <span className="text-indigo-600 italic">"{entry.note}"</span>}
+                          </div>
+                          {!selectMode && entry.checkpoint && onDeleteLineageEntry && (
+                            <button
+                              onClick={() => { setPendingSingle({ updateId: entry.updateId, savedAt: entry.savedAt }); setConfirmDelete('single'); }}
+                              className="text-gray-300 hover:text-red-500 transition-colors shrink-0 mt-0.5"
+                              title="Delete this checkpoint"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                        <p><span className="font-medium text-gray-500">Today:</span> {entry.today.trim() || 'None'}</p>
+                        <p><span className="font-medium text-gray-500">Blockers:</span> {entry.blockers.trim() || 'None'}</p>
                       </div>
-                      <p><span className="font-medium text-gray-500">Today:</span> {entry.today.trim() || 'None'}</p>
-                      <p><span className="font-medium text-gray-500">Blockers:</span> {entry.blockers.trim() || 'None'}</p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Lineage delete confirmation modal */}
+          {confirmDelete !== null && (
+            <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setConfirmDelete(null)}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-9 h-9 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                    <Trash2 className="w-4 h-4 text-red-500" />
+                  </div>
+                  <h2 className="text-base font-bold text-gray-900">
+                    {confirmDelete === 'all' ? 'Clear all lineage entries' : confirmDelete === 'selected' ? `Delete ${selectedIds.size} ${selectedIds.size === 1 ? 'entry' : 'entries'}` : 'Delete checkpoint'}
+                  </h2>
+                </div>
+                <p className="text-sm text-gray-600 mb-5">
+                  {confirmDelete === 'all'
+                    ? 'This will remove all checkpoint entries from the task lineage. This cannot be undone.'
+                    : confirmDelete === 'selected'
+                    ? `This will remove the ${selectedIds.size} selected checkpoint ${selectedIds.size === 1 ? 'entry' : 'entries'}. This cannot be undone.`
+                    : 'Are you sure you want to delete this checkpoint entry? This cannot be undone.'}
+                </p>
+                <div className="flex gap-3 justify-end">
+                  <button
+                    onClick={() => { setConfirmDelete(null); setPendingSingle(null); }}
+                    className="text-sm px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (confirmDelete === 'single' && pendingSingle && onDeleteLineageEntry) {
+                        onDeleteLineageEntry(pendingSingle.updateId, pendingSingle.savedAt);
+                      } else if (confirmDelete === 'selected' && onDeleteLineageEntries) {
+                        const toDelete = sortedLineage
+                          .filter((e) => selectedIds.has(e.id))
+                          .map((e) => ({ updateId: e.updateId, savedAt: e.savedAt }));
+                        onDeleteLineageEntries(toDelete);
+                        setSelectMode(false);
+                        setSelectedIds(new Set());
+                      } else if (confirmDelete === 'all' && onDeleteLineageEntries) {
+                        const toDelete = sortedLineage
+                          .filter((e) => e.checkpoint)
+                          .map((e) => ({ updateId: e.updateId, savedAt: e.savedAt }));
+                        onDeleteLineageEntries(toDelete);
+                      }
+                      setConfirmDelete(null);
+                      setPendingSingle(null);
+                    }}
+                    className="flex items-center gap-2 text-sm px-4 py-2 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    {confirmDelete === 'all' ? 'Clear all' : 'Delete'}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>

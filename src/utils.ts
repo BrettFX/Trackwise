@@ -251,6 +251,27 @@ export function deleteUpdate(id: string): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
 }
 
+/** Remove a single checkpoint snapshot from an update's changelog by its savedAt timestamp. */
+export function deleteCheckpoint(updateId: string, savedAt: string): SavedUpdate | null {
+  const all = loadSavedUpdates();
+  const idx = all.findIndex((u) => u.id === updateId);
+  if (idx < 0) return null;
+  all[idx].changelog = all[idx].changelog.filter((snap) => snap.savedAt !== savedAt);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+  return all[idx];
+}
+
+/** Remove multiple checkpoint snapshots in a single write. Each entry is { updateId, savedAt }. */
+export function deleteCheckpoints(entries: { updateId: string; savedAt: string }[]): void {
+  const all = loadSavedUpdates();
+  for (const { updateId, savedAt } of entries) {
+    const idx = all.findIndex((u) => u.id === updateId);
+    if (idx < 0) continue;
+    all[idx].changelog = all[idx].changelog.filter((snap) => snap.savedAt !== savedAt);
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+}
+
 export function renameUpdate(id: string, newName: string): void {
   const all = loadSavedUpdates();
   const idx = all.findIndex((u) => u.id === id);
