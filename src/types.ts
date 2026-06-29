@@ -4,6 +4,7 @@ export type StoryPriority = 'low' | 'medium' | 'high';
 
 export interface OutputSettings {
   showStatus: boolean;
+  showPriority: boolean;
   excludeStatuses: StoryStatus[];
 }
 

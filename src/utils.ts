@@ -7,6 +7,7 @@ const COLLAPSED_TASK_IDS_KEY = 'trackwise-collapsed-task-ids';
 
 export const DEFAULT_OUTPUT_SETTINGS: OutputSettings = {
   showStatus: true,
+  showPriority: true,
   excludeStatuses: [],
 };
 
@@ -564,7 +565,7 @@ export function formatOutputHTML(stories: StoryEntry[], settings: OutputSettings
     return [
       `<p>${storyLine}</p>`,
       ...(settings.showStatus ? [`<p><b>Status:</b> ${STATUS_LABELS[status]}</p>`] : []),
-      ...(priority ? [`<p><b>Priority:</b> ${TASK_PRIORITY_LABELS[priority]}</p>`] : []),
+      ...(settings.showPriority && priority ? [`<p><b>Priority:</b> ${TASK_PRIORITY_LABELS[priority]}</p>`] : []),
       `<p><b>Yesterday:</b> ${toHtmlLines(story.yesterday.trim() || 'None')}</p>`,
       `<p><b>Today:</b> ${toHtmlLines(story.today.trim())}</p>`,
       `<p><b>Blockers:</b> ${toHtmlLines(story.blockers.trim() || 'None')}</p>`,
