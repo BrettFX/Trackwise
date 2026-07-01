@@ -1,8 +1,9 @@
 
 import { useState } from 'react';
-import { X, GripVertical, ChevronDown, ChevronUp, History, Trash2, CheckSquare } from 'lucide-react';
+import { X, GripVertical, ChevronDown, ChevronUp, History, Trash2, CheckSquare, Clipboard, ClipboardCheck } from 'lucide-react';
 import type { StoryEntry, StoryPriority, StoryStatus, TaskLineageEntry, TaskType } from '../types';
 import { statusDotClass, TASK_PRIORITY_LABELS, TASK_TYPE_LABELS } from '../utils';
+import { buildLineageSummary } from '../pastTense';
 
 interface StoryCardProps {
   story: StoryEntry;
@@ -78,6 +79,16 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmDelete, setConfirmDelete] = useState<'single' | 'selected' | 'all' | null>(null);
   const [pendingSingle, setPendingSingle] = useState<{ updateId: string; savedAt: string } | null>(null);
+  const [copiedSummary, setCopiedSummary] = useState(false);
+
+  function handleCopySummary() {
+    const summary = buildLineageSummary(sortedLineage.map((e) => ({ savedAt: e.savedAt, today: e.today })));
+    if (!summary) return;
+    navigator.clipboard.writeText(summary).then(() => {
+      setCopiedSummary(true);
+      setTimeout(() => setCopiedSummary(false), 2000);
+    });
+  }
   const status: StoryStatus = story.status ?? 'not-started';
   const taskType: TaskType = story.taskType ?? 'task';
   const priority = story.priority;
@@ -351,54 +362,68 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
                   {lineage.length > 0 ? ` (${lineage.length})` : ''}
                   {lineageOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                 </button>
-                {lineageOpen && sortedLineage.some((e) => e.checkpoint) && (
+                {lineageOpen && (
                   <div className="flex items-center gap-2">
-                    {!selectMode ? (
-                      <>
-                        <button
-                          onClick={() => { setSelectMode(true); setSelectedIds(new Set()); }}
-                          className="flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-500 transition-colors"
-                          title="Select items to delete"
-                        >
-                          <CheckSquare className="w-3.5 h-3.5" />
-                          Select
-                        </button>
-                        <button
-                          onClick={() => setConfirmDelete('all')}
-                          className="flex items-center gap-1 text-xs text-gray-400 hover:text-red-500 transition-colors"
-                          title="Clear all checkpoint entries"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          Clear all
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => {
-                            const allIds = new Set(sortedLineage.filter((e) => e.checkpoint).map((e) => e.id));
-                            setSelectedIds((prev) => prev.size === allIds.size ? new Set() : allIds);
-                          }}
-                          className="text-xs text-gray-400 hover:text-indigo-500 transition-colors"
-                        >
-                          {selectedIds.size === sortedLineage.filter((e) => e.checkpoint).length ? 'Deselect all' : 'Select all'}
-                        </button>
-                        {selectedIds.size > 0 && (
+                    {/* Copy summary — visible whenever there is today content, regardless of checkpoints */}
+                    {!selectMode && sortedLineage.some((e) => e.today.trim()) && (
+                      <button
+                        onClick={handleCopySummary}
+                        className={`flex items-center gap-1 text-xs transition-colors ${copiedSummary ? 'text-emerald-500' : 'text-gray-400 hover:text-indigo-500'}`}
+                        title="Copy past-tense summary to clipboard"
+                      >
+                        {copiedSummary ? <ClipboardCheck className="w-3.5 h-3.5" /> : <Clipboard className="w-3.5 h-3.5" />}
+                        {copiedSummary ? 'Copied!' : 'Copy summary'}
+                      </button>
+                    )}
+                    {/* Select / delete controls — only when checkpoint entries exist */}
+                    {sortedLineage.some((e) => e.checkpoint) && (
+                      !selectMode ? (
+                        <>
                           <button
-                            onClick={() => setConfirmDelete('selected')}
-                            className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 font-semibold transition-colors"
+                            onClick={() => { setSelectMode(true); setSelectedIds(new Set()); }}
+                            className="flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-500 transition-colors"
+                            title="Select items to delete"
+                          >
+                            <CheckSquare className="w-3.5 h-3.5" />
+                            Select
+                          </button>
+                          <button
+                            onClick={() => setConfirmDelete('all')}
+                            className="flex items-center gap-1 text-xs text-gray-400 hover:text-red-500 transition-colors"
+                            title="Clear all checkpoint entries"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
-                            Delete ({selectedIds.size})
+                            Clear all
                           </button>
-                        )}
-                        <button
-                          onClick={() => { setSelectMode(false); setSelectedIds(new Set()); }}
-                          className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
-                        >
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => {
+                              const allIds = new Set(sortedLineage.filter((e) => e.checkpoint).map((e) => e.id));
+                              setSelectedIds((prev) => prev.size === allIds.size ? new Set() : allIds);
+                            }}
+                            className="text-xs text-gray-400 hover:text-indigo-500 transition-colors"
+                          >
+                            {selectedIds.size === sortedLineage.filter((e) => e.checkpoint).length ? 'Deselect all' : 'Select all'}
+                          </button>
+                          {selectedIds.size > 0 && (
+                            <button
+                              onClick={() => setConfirmDelete('selected')}
+                              className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 font-semibold transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              Delete ({selectedIds.size})
+                            </button>
+                          )}
+                          <button
+                            onClick={() => { setSelectMode(false); setSelectedIds(new Set()); }}
+                            className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                          >
                           Cancel
                         </button>
                       </>
+                      )
                     )}
                   </div>
                 )}
