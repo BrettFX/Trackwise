@@ -121,24 +121,47 @@ export function convertToPastTense(text: string): string {
   }).join(' ');
 }
 
-// today values that represent "nothing to report" — skip them in the summary.
-const EMPTY_TODAY = /^(none|n\/a|na|-{1,3}|nothing|nil|n\.a\.)\.?(\s*\(.*\))?$/i;
+// Strip trailing punctuation for reliable key comparison.
+function normalizeKey(text: string): string {
+  return text.trim().toLowerCase().replace(/[.!?,;]+$/, '');
+}
 
-function buildIntroParagraph(bullets: string[]): string {
-  if (bullets.length < 2) return '';
+// Classifies and processes a single today-field value.
+// Returns the past-tense sentence to include in the summary, or null to skip.
+function processEntry(today: string): string | null {
+  const key = normalizeKey(today);
+  if (!key) return null;
 
-  // Strip bullet marker and trailing period from each sentence.
-  const sentences = bullets.map((b) => b.replace(/^• /, '').replace(/\.$/, '').trim());
-
-  // With many entries, a full inline join becomes unwieldy.
-  if (sentences.length > 4) {
-    return `The following progress was made across ${sentences.length} updates.`;
+  // "None/nothing/nil/N/A/— (Status)" pattern — detect the status in the parens.
+  const noneWithStatus = key.match(/^(?:none|nothing|nil|n\/a|na|-+)\s*\(([^)]+)\)/);
+  if (noneWithStatus) {
+    const status = noneWithStatus[1].replace(/[\s_-]+/g, ' ').trim();
+    if (/^(done|complet\w*|finish\w*|resolv\w*)$/.test(status)) {
+      return 'Completed work for this task';
+    }
+    return null; // skip in-progress / blocked / not-started status-only entries
   }
 
-  // Join: first sentence keeps its capitalisation; subsequent ones are lowercased.
-  const parts = sentences.map((s, i) =>
-    i === 0 ? s : s.charAt(0).toLowerCase() + s.slice(1)
-  );
+  // Bare empty indicators with no status context.
+  if (/^(none|nothing|nil|n\/a|na|-{1,3}|n\.a\.)$/.test(key)) return null;
+
+  // Normal update text — convert to past tense.
+  return convertToPastTense(today.trim());
+}
+
+function buildIntroParagraph(sentences: string[]): string {
+  if (sentences.length < 2) return sentences[0] ?? '';
+
+  // Strip trailing periods before joining so punctuation doesn't double up.
+  const parts = sentences.map((s, i) => {
+    const stripped = s.replace(/\.$/, '').trim();
+    return i === 0 ? stripped : stripped.charAt(0).toLowerCase() + stripped.slice(1);
+  });
+
+  // With many entries a full inline join becomes unwieldy.
+  if (parts.length > 4) {
+    return `Progress was made across ${parts.length} updates: ${parts.join('; ')}.`;
+  }
 
   const body =
     parts.length === 2
@@ -149,26 +172,23 @@ function buildIntroParagraph(bullets: string[]): string {
 }
 
 /**
- * Builds a past-tense summary from lineage "today" entries.
- * Entries are sorted oldest-first so the summary reads chronologically.
- * Returns an extractive intro paragraph followed by a bulleted detail list.
+ * Builds a consolidated past-tense summary from lineage "today" entries.
+ * Entries are sorted oldest-first, deduplicated, and empty/placeholder values
+ * are either skipped or converted to a meaningful phrase ("None (Done)" →
+ * "Completed work for this task").
  */
 export function buildLineageSummary(todayEntries: { savedAt: string; today: string }[]): string {
   const seen = new Set<string>();
 
-  const chronological = [...todayEntries]
+  const sentences = [...todayEntries]
     .sort((a, b) => new Date(a.savedAt).getTime() - new Date(b.savedAt).getTime())
-    .filter((e) => {
-      const normalized = e.today.trim().toLowerCase();
-      if (!normalized || EMPTY_TODAY.test(normalized) || seen.has(normalized)) return false;
-      seen.add(normalized);
-      return true;
+    .flatMap((e) => {
+      const key = normalizeKey(e.today);
+      if (seen.has(key)) return [];
+      seen.add(key);
+      const result = processEntry(e.today);
+      return result ? [result] : [];
     });
 
-  if (chronological.length === 0) return '';
-
-  const bullets = chronological.map((e) => '• ' + convertToPastTense(e.today.trim()));
-  const intro   = buildIntroParagraph(bullets);
-
-  return intro || bullets.join('\n');
+  return buildIntroParagraph(sentences);
 }
