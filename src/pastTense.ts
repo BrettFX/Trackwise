@@ -171,24 +171,76 @@ function buildIntroParagraph(sentences: string[]): string {
   return `${body.charAt(0).toUpperCase() + body.slice(1)}.`;
 }
 
+function formatNextStep(text: string): string {
+  const stripped = text.trim().replace(/[.!?]+$/, '');
+  const lower = stripped.charAt(0).toLowerCase() + stripped.slice(1);
+  return `Next steps are to ${lower}.`;
+}
+
 /**
- * Builds a consolidated past-tense summary from lineage "today" entries.
- * Entries are sorted oldest-first, deduplicated, and empty/placeholder values
- * are either skipped or converted to a meaningful phrase ("None (Done)" →
- * "Completed work for this task").
+ * Builds a consolidated past-tense summary from lineage entries.
+ * Both "yesterday" and "today" fields are included; entries are sorted
+ * oldest-first and deduplicated so that a "yesterday" that repeats the
+ * previous entry's "today" is silently dropped.
+ * Placeholder values ("None", "None (Done)" → smart replacement, etc.) are
+ * handled by processEntry().
+ *
+ * When isComplete is false, the most recent non-placeholder today entry is
+ * excluded from past-tense conversion and appended as "Next steps are to …"
  */
-export function buildLineageSummary(todayEntries: { savedAt: string; today: string }[]): string {
+export function buildLineageSummary(
+  todayEntries: { savedAt: string; yesterday: string; today: string }[],
+  isComplete = true,
+): string {
+  const sorted = [...todayEntries].sort(
+    (a, b) => new Date(a.savedAt).getTime() - new Date(b.savedAt).getTime(),
+  );
+
+  // Identify the last entry with a real today value (for next-steps handling).
+  let nextStepText: string | null = null;
+  let nextStepIdx = -1;
+  if (!isComplete) {
+    for (let i = sorted.length - 1; i >= 0; i--) {
+      const key = normalizeKey(sorted[i].today);
+      if (key && !/^(none|nothing|nil|n\/a|na|-{1,3}|n\.a\.)$/.test(key)) {
+        nextStepText = sorted[i].today.trim();
+        nextStepIdx = i;
+        break;
+      }
+    }
+  }
+
   const seen = new Set<string>();
 
-  const sentences = [...todayEntries]
-    .sort((a, b) => new Date(a.savedAt).getTime() - new Date(b.savedAt).getTime())
-    .flatMap((e) => {
-      const key = normalizeKey(e.today);
-      if (seen.has(key)) return [];
-      seen.add(key);
-      const result = processEntry(e.today);
-      return result ? [result] : [];
-    });
+  function consume(text: string): string | null {
+    const key = normalizeKey(text);
+    if (!key || seen.has(key)) return null;
+    seen.add(key);
+    return processEntry(text);
+  }
 
-  return buildIntroParagraph(sentences);
+  const sentences = sorted.flatMap((e, idx) => {
+    const results: string[] = [];
+    const y = consume(e.yesterday);
+    if (y) results.push(y);
+
+    // Skip the next-step entry from past-tense conversion.
+    if (!isComplete && idx === nextStepIdx) {
+      seen.add(normalizeKey(e.today)); // mark seen so dedup still works
+      return results;
+    }
+
+    const t = consume(e.today);
+    if (t) results.push(t);
+    return results;
+  });
+
+  const summary = buildIntroParagraph(sentences);
+
+  if (!isComplete && nextStepText) {
+    const nextStep = formatNextStep(nextStepText);
+    return summary ? `${summary} ${nextStep}` : nextStep;
+  }
+
+  return summary;
 }

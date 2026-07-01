@@ -82,7 +82,8 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
   const [copiedSummary, setCopiedSummary] = useState(false);
 
   function handleCopySummary() {
-    const summary = buildLineageSummary(sortedLineage.map((e) => ({ savedAt: e.savedAt, today: e.today })));
+    const isComplete = story.status === 'done';
+    const summary = buildLineageSummary(sortedLineage.map((e) => ({ savedAt: e.savedAt, yesterday: e.yesterday, today: e.today })), isComplete);
     if (!summary) return;
     navigator.clipboard.writeText(summary).then(() => {
       setCopiedSummary(true);
@@ -478,6 +479,7 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
                             </button>
                           )}
                         </div>
+                        <p><span className="font-medium text-gray-500">Yesterday:</span> {entry.yesterday.trim() || 'None'}</p>
                         <p><span className="font-medium text-gray-500">Today:</span> {entry.today.trim() || 'None'}</p>
                         <p><span className="font-medium text-gray-500">Blockers:</span> {entry.blockers.trim() || 'None'}</p>
                       </div>

@@ -67,6 +67,7 @@ export interface TaskLineageEntry {
   savedAt: string;
   title: string;
   status: StoryStatus;
+  yesterday: string;
   today: string;
   blockers: string;
   note?: string;
