@@ -10,13 +10,25 @@ export default function OutputPanel({ htmlOutput }: OutputPanelProps) {
 
   async function handleCopy() {
     if (!htmlOutput.trim()) return;
+    const plainText = htmlOutput
+      .replace(/<hr\s*\/?>/gi, '\n---\n')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
     try {
-      const blob = new Blob([htmlOutput], { type: 'text/html' });
-      await navigator.clipboard.write([new ClipboardItem({ 'text/html': blob })]);
+      const htmlBlob = new Blob([htmlOutput], { type: 'text/html' });
+      const textBlob = new Blob([plainText], { type: 'text/plain' });
+      await navigator.clipboard.write([new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob })]);
     } catch {
       // Fallback: plain text copy via a hidden element
       const ta = document.createElement('textarea');
-      ta.value = htmlOutput;
+      ta.value = plainText;
       document.body.appendChild(ta);
       ta.select();
       document.execCommand('copy');
@@ -55,8 +67,8 @@ export default function OutputPanel({ htmlOutput }: OutputPanelProps) {
       <div className="p-5">
         {hasOutput ? (
           <div
-            className="prose prose-sm max-w-none rounded-lg border border-gray-200 bg-gray-50 px-5 py-4 text-sm text-gray-800 leading-relaxed
-              [&_p]:my-1 [&_hr]:my-4 [&_hr]:border-gray-300 [&_b]:font-semibold [&_a]:text-indigo-600 [&_a:hover]:text-indigo-800"
+            className="prose prose-sm max-w-none rounded-lg border border-gray-200 bg-gray-50 px-5 py-4 text-sm text-gray-800 leading-relaxed break-words
+              [&_p]:my-1 [&_hr]:my-4 [&_hr]:border-gray-300 [&_b]:font-semibold [&_a]:text-indigo-600 [&_a:hover]:text-indigo-800 [&_a]:break-words"
             dangerouslySetInnerHTML={{ __html: htmlOutput }}
           />
         ) : (
