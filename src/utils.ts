@@ -550,9 +550,9 @@ export function formatOutputHTML(stories: StoryEntry[], settings: OutputSettings
     const linkAttrs = `href="${href}" target="_blank" rel="noopener noreferrer"`;
     let storyLine: string;
     if (story.title && story.jiraUrl && story.ticketNumber) {
-      storyLine = `<b>${typeLabel}:</b> <a ${linkAttrs}>${escapeHtml(story.title)} (${escapeHtml(story.ticketNumber)})</a>`;
+      storyLine = `<b>${typeLabel}:</b> ${escapeHtml(story.title)} (<a ${linkAttrs}>${escapeHtml(story.ticketNumber)}</a>)`;
     } else if (story.title && story.jiraUrl) {
-      storyLine = `<b>${typeLabel}:</b> <a ${linkAttrs}>${escapeHtml(story.title)}</a>`;
+      storyLine = `<b>${typeLabel}:</b> ${escapeHtml(story.title)} (<a ${linkAttrs}>link</a>)`;
     } else if (story.title && story.ticketNumber) {
       storyLine = `<b>${typeLabel}:</b> ${escapeHtml(story.title)} (${escapeHtml(story.ticketNumber)})`;
     } else {
