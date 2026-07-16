@@ -4,6 +4,6 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/Trackwise/',
+  base: process.env.TAURI_ENV_PLATFORM ? './' : '/Trackwise/',
   plugins: [react(), tailwindcss()],
 })
