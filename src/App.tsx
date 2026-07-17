@@ -5,8 +5,10 @@ import OutputPanel from './components/OutputPanel';
 import HistoryPanel from './components/HistoryPanel';
 import ImportModal from './components/ImportModal';
 import VersionInfo from './components/VersionInfo';
+import UpdateNotification from './components/UpdateNotification';
 import OutputSettingsPanel from './components/OutputSettingsPanel';
 import NavPanel from './components/NavPanel';
+import { useUpdater } from './hooks/useUpdater';
 import type { StoryEntry, SavedUpdate, StoryStatus, TaskLineageEntry, TaskListSettings, TaskListSortKey } from './types';
 import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, deleteCheckpoint, deleteCheckpoints, renameUpdate, exportUpdates, exportSingleUpdate, hasUnsavedChanges, loadOutputSettings, saveOutputSettings, loadTaskListSettings, saveTaskListSettings, loadCollapsedTaskIds, saveCollapsedTaskIds, TASK_PRIORITY_LABELS, TASK_PRIORITY_SCORES } from './utils';
 import { storeFileHandle, getHandleForEntry, getAllLinkedFiles, writeEntriesToHandle, removeHandlesForEntries, isFileSystemSaveSupported } from './fileHandleStore';
@@ -181,6 +183,7 @@ function nextSequenceNumber(stories: StoryEntry[]): number {
 }
 
 function App() {
+  const { state: updateState, check: checkForUpdates, dismiss: dismissUpdate } = useUpdater();
   const [stories, setStories] = useState<StoryEntry[]>([makeEmptyStory()]);
   const [htmlOutput, setHtmlOutput] = useState('');
   const [errors, setErrors] = useState<Record<string, Partial<Record<keyof StoryEntry, string>>>>({});
@@ -778,8 +781,14 @@ function App() {
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight">Daily Status Update</h1>
           <p className="text-gray-500 mt-1 text-sm">Fill in your stories and generate a Teams-ready YTB update.</p>
-          <div className="mt-2">
+          <div className="mt-2 flex flex-col items-center gap-2">
             <VersionInfo />
+            <UpdateNotification
+              state={updateState}
+              onCheck={checkForUpdates}
+              onInstall={updateState.status === 'available' ? updateState.install : () => {}}
+              onDismiss={dismissUpdate}
+            />
           </div>
         </div>
 

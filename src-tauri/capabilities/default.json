@@ -3,5 +3,8 @@
   "identifier": "default",
   "description": "Default capabilities for Trackwise",
   "windows": ["main"],
-  "permissions": []
+  "permissions": [
+    "updater:default",
+    "process:default"
+  ]
 }
