@@ -57,6 +57,6 @@ jobs:
           tagName: v__VERSION__
           releaseName: 'Trackwise v__VERSION__'
           releaseBody: 'Desktop builds for Windows, macOS, and Linux.'
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
