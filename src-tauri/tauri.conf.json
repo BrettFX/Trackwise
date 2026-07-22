@@ -35,7 +35,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQzMkI4OUQ2MkM3NDRGMUEKUldRYVQzUXMxb2tyUXczazJ0R0FrVXU5dEZxSS9qREVLazl5engvbmx2ejBlSWo0bEFyanNyWlQK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIwMDRFNzlGOEU4ODFCOTkKUldTWkc0aU9uK2NFc0RLL1FrdW9IM3lUbnAvY0JJbkJSK3U2cUlHeVIxejM4d21HRkhnMG9tcWYK",
       "endpoints": [
         "https://github.com/BrettFX/Trackwise/releases/latest/download/latest.json"
       ]
