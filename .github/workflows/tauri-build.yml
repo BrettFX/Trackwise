@@ -6,7 +6,32 @@ on:
   workflow_dispatch:
 
 jobs:
+  create-release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create-release.outputs.id }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: echo "version=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Create draft release
+        id: create-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Trackwise v${{ steps.version.outputs.version }}
+          body: Desktop builds for Windows, macOS, and Linux.
+          draft: true
+          prerelease: false
+
   publish-tauri:
+    needs: create-release
     permissions:
       contents: write
     strategy:
@@ -54,9 +79,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
-          tagName: v__VERSION__
-          releaseName: 'Trackwise v__VERSION__'
-          releaseBody: 'Desktop builds for Windows, macOS, and Linux.'
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
