@@ -12,7 +12,7 @@ export const DEFAULT_OUTPUT_SETTINGS: OutputSettings = {
 };
 
 export const DEFAULT_TASK_LIST_SETTINGS: TaskListSettings = {
-  sortBy: 'createdAt',
+  sortBy: 'status',
   filterStatus: 'all',
   filterPriority: 'all',
   filterDate: 'all',

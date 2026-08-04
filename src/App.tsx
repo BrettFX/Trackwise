@@ -281,6 +281,7 @@ function App() {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const draggingStoryIdRef = useRef<string | null>(null);
   const filterMenuRef = useRef<HTMLDetailsElement>(null);
   const settingsMenuRef = useRef<HTMLDetailsElement>(null);
@@ -658,22 +659,36 @@ function App() {
     // Always resolve the latest version from storage to pick up any renames
     const fresh = loadSavedUpdates().find((u) => u.id === update.id) ?? update;
     const loaded = fresh.stories.map((s) => ({ ...s }));
-    setStories(loaded);
+    const currentSortBy = taskListSettings.sortBy;
+    const sorted = currentSortBy === 'custom'
+      ? loaded
+      : sortStoriesBy(loaded, currentSortBy, new Map(loaded.map((s, i) => [s.id, i])));
+    setStories(sorted);
     setCurrentUpdateId(fresh.id);
     setSaveName(fresh.name);
-    setHtmlOutput(formatOutputHTML(loaded, outputSettings));
+    setHtmlOutput(formatOutputHTML(sorted, outputSettings));
     setErrors({});
+    const collapsed = new Set(sorted.map((s) => s.id));
+    setCollapsedIds(collapsed);
+    saveCollapsedTaskIds(collapsed);
   }
 
   function handleLoadSnapshot(parentUpdate: SavedUpdate, snapshotStories: StoryEntry[]) {
     // Resolve fresh parent so the name reflects any renames made after the snapshot was captured
     const freshParent = loadSavedUpdates().find((u) => u.id === parentUpdate.id) ?? parentUpdate;
     const loaded = snapshotStories.map((s) => ({ ...s }));
-    setStories(loaded);
+    const currentSortBy = taskListSettings.sortBy;
+    const sorted = currentSortBy === 'custom'
+      ? loaded
+      : sortStoriesBy(loaded, currentSortBy, new Map(loaded.map((s, i) => [s.id, i])));
+    setStories(sorted);
     setCurrentUpdateId(freshParent.id);
     setSaveName(freshParent.name);
-    setHtmlOutput(formatOutputHTML(loaded, outputSettings));
+    setHtmlOutput(formatOutputHTML(sorted, outputSettings));
     setErrors({});
+    const collapsed = new Set(sorted.map((s) => s.id));
+    setCollapsedIds(collapsed);
+    saveCollapsedTaskIds(collapsed);
   }
 
   function handleDelete(id: string) {
@@ -770,19 +785,22 @@ function App() {
   const isEditing = currentUpdateId !== null;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50 px-3 pt-6 pb-24 sm:px-4 sm:pt-10 sm:pb-28 lg:py-10">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50">
       <NavPanel />
-      <div className="max-w-3xl mx-auto">
 
-        {/* Header */}
-        <div className="mb-8 text-center">
-          <div className="inline-flex items-center gap-2 bg-indigo-600 text-white px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest mb-4">
-            <Zap className="w-3.5 h-3.5" /> Trackwise
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight">Daily Status Update</h1>
-          <p className="text-gray-500 mt-1 text-sm">Fill in your stories and generate a Teams-ready YTB update.</p>
-          <div className="mt-2 flex flex-col items-center gap-2">
-            <VersionInfo />
+      {/* Sticky banner */}
+      <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-sm shadow-sm border-b border-gray-100">
+        <div className="max-w-3xl mx-auto px-3 sm:px-4 py-2.5">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setAboutOpen(true)}
+              aria-label="About Trackwise"
+              title="About Trackwise"
+              className="inline-flex items-center gap-1.5 bg-indigo-600 text-white px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest hover:bg-indigo-700 transition-colors cursor-pointer"
+            >
+              <Zap className="w-3 h-3" /> Trackwise
+            </button>
+            <span className="text-sm font-bold text-gray-800 flex-1">Daily Status Update</span>
             <UpdateNotification
               state={updateState}
               onCheck={checkForUpdates}
@@ -790,7 +808,13 @@ function App() {
               onDismiss={dismissUpdate}
             />
           </div>
+          <div className="pl-0.5 mt-1">
+            <VersionInfo />
+          </div>
         </div>
+      </header>
+
+      <div className="max-w-3xl mx-auto px-3 sm:px-4 pb-24 sm:pb-28 lg:pb-10">
 
         {/* Save-as-new modal */}
         {saveNamePrompt && (
@@ -987,8 +1011,71 @@ function App() {
           <ImportModal onClose={() => setImportOpen(false)} onImported={handleImportDone} />
         )}
 
+        {/* About modal */}
+        {aboutOpen && (
+          <div
+            className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+            onClick={(e) => { if (e.target === e.currentTarget) setAboutOpen(false); }}
+          >
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+              <div className="flex items-start justify-between px-6 pt-6 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center shrink-0">
+                    <Zap className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-gray-900">Trackwise</h2>
+                    <VersionInfo />
+                  </div>
+                </div>
+                <button
+                  onClick={() => setAboutOpen(false)}
+                  aria-label="Close"
+                  className="mt-1 text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="px-6 pb-6">
+                <p className="text-sm text-gray-600 leading-relaxed mb-5">
+                  A daily standup utility for software teams. Capture Yesterday / Today / Blockers entries across your tasks and generate a formatted update ready to share in Microsoft Teams, Slack, or any standup tool.
+                </p>
+                <div className="flex flex-col gap-2.5 mb-5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center shrink-0">
+                      <Zap className="w-3.5 h-3.5 text-indigo-500" />
+                    </div>
+                    <span className="text-sm text-gray-600">Generate formatted YTB output for Teams or Slack</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center shrink-0">
+                      <Save className="w-3.5 h-3.5 text-indigo-500" />
+                    </div>
+                    <span className="text-sm text-gray-600">Save updates locally with full revision history</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center shrink-0">
+                      <Bookmark className="w-3.5 h-3.5 text-indigo-500" />
+                    </div>
+                    <span className="text-sm text-gray-600">Checkpoint milestones and carry items across sprints</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center shrink-0">
+                      <FilePlus className="w-3.5 h-3.5 text-indigo-500" />
+                    </div>
+                    <span className="text-sm text-gray-600">Import and export updates as portable JSON files</span>
+                  </div>
+                </div>
+                <div className="border-t border-gray-100 pt-4">
+                  <p className="text-xs text-gray-400">Updates are stored locally in this browser unless linked to a JSON file.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* History */}
-        <div id="section-history">
+        <div id="section-history" className="mt-8">
         <HistoryPanel
           history={history}
           onLoad={handleLoad}

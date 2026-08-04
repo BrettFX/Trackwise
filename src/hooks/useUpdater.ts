@@ -8,6 +8,7 @@ export interface UpdateInfo {
 export type UpdateState =
   | { status: 'idle' }
   | { status: 'checking' }
+  | { status: 'up-to-date' }
   | { status: 'available'; info: UpdateInfo; install: () => Promise<void> }
   | { status: 'downloading' }
   | { status: 'error'; message: string };
@@ -23,16 +24,24 @@ export function useUpdater() {
   const checkInProgress = useRef(false);
 
   const check = useCallback(async () => {
-    if (!isTauri() || checkInProgress.current) return;
+    if (checkInProgress.current) return;
     checkInProgress.current = true;
     setState({ status: 'checking' });
+
+    if (!isTauri()) {
+      // Show spinner briefly so the UI responds, then report up-to-date
+      await new Promise<void>((resolve) => setTimeout(resolve, 600));
+      setState({ status: 'up-to-date' });
+      checkInProgress.current = false;
+      return;
+    }
 
     try {
       const { check: checkUpdate } = await import('@tauri-apps/plugin-updater');
       const update = await checkUpdate();
 
       if (!update?.available) {
-        setState({ status: 'idle' });
+        setState({ status: 'up-to-date' });
         checkInProgress.current = false;
         return;
       }

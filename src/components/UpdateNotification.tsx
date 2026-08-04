@@ -1,4 +1,6 @@
-import { RefreshCw, X, Download, AlertCircle } from 'lucide-react';
+import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { RefreshCw, X, Download, AlertCircle, Check } from 'lucide-react';
 import type { UpdateState } from '../hooks/useUpdater';
 
 interface Props {
@@ -13,6 +15,12 @@ export default function UpdateNotification({ state, onCheck, onInstall, onDismis
   const isDownloading = state.status === 'downloading';
   const busy = isChecking || isDownloading;
 
+  useEffect(() => {
+    if (state.status !== 'up-to-date') return;
+    const id = setTimeout(() => onDismiss(), 4000);
+    return () => clearTimeout(id);
+  }, [state.status, onDismiss]);
+
   return (
     <>
       {/* Check for updates button — always visible in header */}
@@ -26,8 +34,8 @@ export default function UpdateNotification({ state, onCheck, onInstall, onDismis
         {isChecking ? 'Checking…' : 'Check for updates'}
       </button>
 
-      {/* Update available dialog */}
-      {state.status === 'available' && (
+      {/* Portaled overlays — rendered on document.body to escape backdrop-filter stacking contexts */}
+      {state.status === 'available' && createPortal(
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md">
             <div className="flex items-start justify-between mb-3">
@@ -74,29 +82,41 @@ export default function UpdateNotification({ state, onCheck, onInstall, onDismis
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* Downloading progress overlay */}
-      {state.status === 'downloading' && (
+      {state.status === 'downloading' && createPortal(
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm text-center">
             <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin mx-auto mb-3" />
             <p className="text-sm font-semibold text-gray-900">Downloading update…</p>
             <p className="text-xs text-gray-400 mt-1">Trackwise will restart when ready.</p>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* Error toast */}
-      {state.status === 'error' && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-xs font-medium px-4 py-2.5 rounded-xl shadow-lg">
-          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-          <span>Update check failed: {state.message}</span>
-          <button onClick={onDismiss} className="ml-2 text-red-400 hover:text-red-600">
+      {state.status === 'up-to-date' && createPortal(
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-medium px-4 py-2.5 rounded-xl shadow-lg whitespace-nowrap">
+          <Check className="w-3.5 h-3.5 shrink-0" />
+          <span>You&apos;re on the latest version.</span>
+          <button onClick={onDismiss} className="ml-2 text-emerald-400 hover:text-emerald-600 transition-colors">
             <X className="w-3.5 h-3.5" />
           </button>
-        </div>
+        </div>,
+        document.body
+      )}
+
+      {state.status === 'error' && createPortal(
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-xs font-medium px-4 py-2.5 rounded-xl shadow-lg">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          <span>Update check failed: {state.message}</span>
+          <button onClick={onDismiss} className="ml-2 text-red-400 hover:text-red-600 transition-colors">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>,
+        document.body
       )}
     </>
   );
