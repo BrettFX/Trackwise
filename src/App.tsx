@@ -786,10 +786,9 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50">
-      <NavPanel />
-
-      {/* Sticky banner */}
-      <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-sm shadow-sm border-b border-gray-100">
+      {/* Sticky banner + nav */}
+      <div className="sticky top-0 z-50 bg-white/95 backdrop-blur-sm shadow-sm">
+      <header>
         <div className="max-w-3xl mx-auto px-3 sm:px-4 py-2.5">
           <div className="flex items-center gap-3">
             <button
@@ -813,8 +812,10 @@ function App() {
           </div>
         </div>
       </header>
+      <NavPanel />
+      </div>
 
-      <div className="max-w-3xl mx-auto px-3 sm:px-4 pb-24 sm:pb-28 lg:pb-10">
+      <div className="max-w-3xl mx-auto px-3 sm:px-4 pb-12 lg:pb-10">
 
         {/* Save-as-new modal */}
         {saveNamePrompt && (
