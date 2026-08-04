@@ -34,8 +34,17 @@ try {
   }
 }
 
-// Optional version override from CLI: node update-version.js 1.2.3
-const newVersion = process.argv[2] || currentVersion;
+// Optional flags: --bump (auto-increment patch) or an explicit version string
+const bumpFlag = process.argv.includes('--bump');
+const explicitVersion = process.argv.find((a) => /^\d+\.\d+\.\d+$/.test(a));
+
+let newVersion = currentVersion;
+if (explicitVersion) {
+  newVersion = explicitVersion;
+} else if (bumpFlag) {
+  const [major, minor, patch] = currentVersion.split('.').map(Number);
+  newVersion = `${major}.${minor}.${patch + 1}`;
+}
 
 const versionData = { version: newVersion, buildDate };
 fs.writeFileSync(versionPath, JSON.stringify(versionData, null, 2) + '\n');

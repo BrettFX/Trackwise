@@ -20,6 +20,18 @@ jobs:
         id: version
         run: echo "version=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> $GITHUB_OUTPUT
 
+      - name: Guard against unchanged version
+        run: |
+          LATEST_TAG=$(curl -sL "https://api.github.com/repos/BrettFX/Trackwise/releases/latest" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" | \
+            python3 -c "import sys,json; r=json.load(sys.stdin); print(r.get('tag_name','none'))")
+          CURRENT="v${{ steps.version.outputs.version }}"
+          if [ "$LATEST_TAG" = "$CURRENT" ]; then
+            echo "ERROR: Version $CURRENT matches the already-published release. Bump the version in tauri.conf.json before deploying."
+            exit 1
+          fi
+          echo "Version check passed: $LATEST_TAG → $CURRENT"
+
       - name: Create draft release
         id: create-release
         uses: softprops/action-gh-release@v2
