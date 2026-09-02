@@ -1,4 +1,5 @@
-import type { StoryEntry, SavedUpdate, UpdateSnapshot, StoryStatus, StoryPriority, TaskType, OutputSettings, TaskListSettings } from './types';
+import type { StoryEntry, SavedUpdate, UpdateSnapshot, StoryStatus, StoryPriority, TaskType, OutputSettings, TaskListSettings, TaskLineageEntry } from './types';
+import { textSimilarity, DEFAULT_FUZZY_THRESHOLD } from './fuzzyMatch';
 
 const STORAGE_KEY = 'ytb-saved-updates';
 const OUTPUT_SETTINGS_KEY = 'trackwise-output-settings';
@@ -180,6 +181,13 @@ export function saveAsNew(name: string, stories: StoryEntry[]): SavedUpdate {
   return update;
 }
 
+/** Insert a fully-formed update (e.g. seeded sample data), replacing any existing entry with the same id. */
+export function upsertSavedUpdate(update: SavedUpdate): void {
+  const all = loadSavedUpdates().filter((u) => u.id !== update.id);
+  all.unshift(update);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+}
+
 /** Silently sync stories/name — no changelog entry created. */
 export function silentSave(id: string, name: string, stories: StoryEntry[]): SavedUpdate | null {
   const all = loadSavedUpdates();
@@ -206,6 +214,40 @@ function contentFingerprint(stories: StoryEntry[]): string {
       priority: s.priority,
     }))
   );
+}
+
+function lineageEntryText(entry: TaskLineageEntry): string {
+  return [entry.title, entry.yesterday, entry.today, entry.blockers].map((s) => s.trim()).join(' | ');
+}
+
+/**
+ * Groups consecutive task-lineage entries (sorted oldest → newest) whose content is a
+ * near-exact match — e.g. a checkpoint saved after only tweaking the status field.
+ * Exact duplicates are already collapsed by dedupeTaskLineage; this catches the
+ * remaining "fuzzy" duplicates so they can be flagged for cleanup.
+ */
+export function findFuzzyDuplicateLineageGroups(
+  entries: TaskLineageEntry[],
+  threshold = DEFAULT_FUZZY_THRESHOLD
+): TaskLineageEntry[][] {
+  const sorted = entries.toSorted((a, b) => new Date(a.savedAt).getTime() - new Date(b.savedAt).getTime());
+  const groups: TaskLineageEntry[][] = [];
+  let current: TaskLineageEntry[] = [];
+
+  for (const entry of sorted) {
+    const prev = current[current.length - 1];
+    if (prev && textSimilarity(lineageEntryText(prev), lineageEntryText(entry)) >= threshold) {
+      current.push(entry);
+    } else {
+      if (current.length > 1) groups.push(current);
+      current = [entry];
+    }
+  }
+  if (current.length > 1) groups.push(current);
+
+  // Only groups with a removable checkpoint entry are actionable — the "current"
+  // live story snapshot can't be deleted on its own.
+  return groups.filter((group) => group.some((e) => e.checkpoint));
 }
 
 /**

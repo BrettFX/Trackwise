@@ -1,4 +1,5 @@
 import nlp from 'compromise';
+import { isFuzzyDuplicate, isPrefixContainment, tokenizeWords } from './fuzzyMatch';
 
 const CONTRACTION_MAP: Record<string, string> = {
   "what's":  'what was',
@@ -45,6 +46,31 @@ function expandContractions(text: string): string {
   return out;
 }
 
+// Abbreviations whose internal periods should never be treated as sentence
+// boundaries (e.g. "e.g." or "etc." mid-sentence).
+const ABBREVIATIONS = ['e.g.', 'i.e.', 'etc.', 'vs.', 'approx.', 'no.', 'jr.', 'sr.', 'mr.', 'mrs.', 'ms.', 'dr.', 'inc.', 'ltd.'];
+const PERIOD_PLACEHOLDER = '\u0000';
+
+function protectAbbreviations(text: string): string {
+  let out = text;
+  for (const abbr of ABBREVIATIONS) {
+    const escaped = abbr.replace(/\./g, '\\.');
+    out = out.replace(new RegExp(escaped, 'gi'), (m) => m.replace(/\./g, PERIOD_PLACEHOLDER));
+  }
+  return out;
+}
+
+// Splits text into individual sentences without breaking on abbreviation periods.
+function splitSentences(text: string): string[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  const protectedText = protectAbbreviations(trimmed);
+  const parts = protectedText.match(/[^.!?]+[.!?]*/g) ?? [protectedText];
+  return parts
+    .map((s) => s.replace(new RegExp(PERIOD_PLACEHOLDER, 'g'), '.').trim())
+    .filter(Boolean);
+}
+
 // Converts a single verb (or short phrasal verb) to past tense via compromise.
 // Wraps in "I <verb>" to give compromise a subject for reliable conjugation.
 function verbToPast(verb: string): string {
@@ -86,7 +112,7 @@ function convertClauseOpener(clause: string): string {
 export function convertToPastTense(text: string): string {
   let processed = expandContractions(text);
 
-  const sentences = processed.match(/[^.!?]+[.!?]*/g) ?? [processed];
+  const sentences = splitSentences(processed);
 
   return sentences.map((sentence) => {
     const trimmed = sentence.trim();
@@ -126,27 +152,39 @@ function normalizeKey(text: string): string {
   return text.trim().toLowerCase().replace(/[.!?,;]+$/, '');
 }
 
-// Classifies and processes a single today-field value.
+const BARE_NONE_RE = /^(none|nothing|nil|n\/a|na|-{1,3}|n\.a\.)$/;
+const NONE_WITH_STATUS_RE = /^(?:none|nothing|nil|n\/a|na|-+)\s*\(([^)]+)\)/;
+
+// True for placeholder values with no actionable content — bare ("none") or
+// status-qualified ("none (Done)"). Shared so "next step" selection never
+// surfaces a placeholder verbatim (e.g. "Next steps are to none (Done)").
+function isPlaceholderKey(key: string): boolean {
+  return BARE_NONE_RE.test(key) || NONE_WITH_STATUS_RE.test(key);
+}
+
+// Classifies and processes a single sentence.
 // Returns the past-tense sentence to include in the summary, or null to skip.
-function processEntry(today: string): string | null {
-  const key = normalizeKey(today);
+// `isComplete` controls whether a "none (Done)" placeholder is rendered as a
+// closing sentence — for an in-progress task it's just noise and is dropped.
+function processSentence(sentence: string, isComplete: boolean): string | null {
+  const key = normalizeKey(sentence);
   if (!key) return null;
 
   // "None/nothing/nil/N/A/— (Status)" pattern — detect the status in the parens.
-  const noneWithStatus = key.match(/^(?:none|nothing|nil|n\/a|na|-+)\s*\(([^)]+)\)/);
+  const noneWithStatus = key.match(NONE_WITH_STATUS_RE);
   if (noneWithStatus) {
     const status = noneWithStatus[1].replace(/[\s_-]+/g, ' ').trim();
-    if (/^(done|complet\w*|finish\w*|resolv\w*)$/.test(status)) {
+    if (isComplete && /^(done|complet\w*|finish\w*|resolv\w*)$/.test(status)) {
       return 'Completed work for this task';
     }
     return null; // skip in-progress / blocked / not-started status-only entries
   }
 
   // Bare empty indicators with no status context.
-  if (/^(none|nothing|nil|n\/a|na|-{1,3}|n\.a\.)$/.test(key)) return null;
+  if (BARE_NONE_RE.test(key)) return null;
 
   // Normal update text — convert to past tense.
-  return convertToPastTense(today.trim());
+  return convertToPastTense(sentence.trim());
 }
 
 function buildIntroParagraph(sentences: string[]): string {
@@ -158,9 +196,9 @@ function buildIntroParagraph(sentences: string[]): string {
     return i === 0 ? stripped : stripped.charAt(0).toLowerCase() + stripped.slice(1);
   });
 
-  // With many entries a full inline join becomes unwieldy.
+  // With many entries, a comma-joined list becomes unwieldy — use semicolons instead.
   if (parts.length > 4) {
-    return `Progress was made across ${parts.length} updates: ${parts.join('; ')}.`;
+    return `${parts.join('; ')}.`;
   }
 
   const body =
@@ -180,10 +218,13 @@ function formatNextStep(text: string): string {
 /**
  * Builds a consolidated past-tense summary from lineage entries.
  * Both "yesterday" and "today" fields are included; entries are sorted
- * oldest-first and deduplicated so that a "yesterday" that repeats the
- * previous entry's "today" is silently dropped.
+ * oldest-first, split into individual sentences, and deduplicated so that
+ * repeated or reworded restatements of the same update collapse into one.
+ * A sentence that's fully restated at the start of a later, longer sentence
+ * (e.g. someone kept re-typing the same opening clause before appending new
+ * work each checkpoint) is dropped in favor of the longer version.
  * Placeholder values ("None", "None (Done)" → smart replacement, etc.) are
- * handled by processEntry().
+ * handled by processSentence().
  *
  * When isComplete is false, the most recent non-placeholder today entry is
  * excluded from past-tense conversion and appended as "Next steps are to …"
@@ -197,43 +238,55 @@ export function buildLineageSummary(
   );
 
   // Identify the last entry with a real today value (for next-steps handling).
+  // A truly blank value is skipped over (the field may just be unfilled), but an
+  // explicit placeholder ("none", "none (Done)") means there is no next step —
+  // search stops there rather than resurrecting older, already-completed text.
   let nextStepText: string | null = null;
   let nextStepIdx = -1;
   if (!isComplete) {
     for (let i = sorted.length - 1; i >= 0; i--) {
-      const key = normalizeKey(sorted[i].today);
-      if (key && !/^(none|nothing|nil|n\/a|na|-{1,3}|n\.a\.)$/.test(key)) {
-        nextStepText = sorted[i].today.trim();
-        nextStepIdx = i;
-        break;
-      }
+      const raw = sorted[i].today.trim();
+      const key = normalizeKey(raw);
+      if (!key) continue;
+      if (isPlaceholderKey(key)) break;
+      nextStepText = raw;
+      nextStepIdx = i;
+      break;
     }
   }
 
-  const seen = new Set<string>();
+  // Build the full pool of candidate sentences in chronological order. The
+  // next-step entry's "today" sentences are still tracked (so later restatements
+  // of it are recognized as redundant) but flagged out of the final output.
+  const candidates = sorted.flatMap((e, idx) => [
+    ...splitSentences(e.yesterday).map((raw) => ({ raw, excluded: false })),
+    ...splitSentences(e.today).map((raw) => ({ raw, excluded: !isComplete && idx === nextStepIdx })),
+  ]);
 
-  function consume(text: string): string | null {
-    const key = normalizeKey(text);
-    if (!key || seen.has(key)) return null;
-    seen.add(key);
-    return processEntry(text);
+  // Dedup pass: drop exact/fuzzy repeats, and collapse prefix-containment pairs
+  // (an older, shorter sentence that's fully restated at the start of a newer,
+  // longer one) down to just the longer, more complete version.
+  const kept: { raw: string; excluded: boolean }[] = [];
+  for (const candidate of candidates) {
+    const key = normalizeKey(candidate.raw);
+    if (!key) continue;
+    const tokens = tokenizeWords(key);
+
+    let redundant = false;
+    for (let i = kept.length - 1; i >= 0; i--) {
+      const existingKey = normalizeKey(kept[i].raw);
+      if (isFuzzyDuplicate(existingKey, key)) { redundant = true; break; }
+      const existingTokens = tokenizeWords(existingKey);
+      if (isPrefixContainment(existingTokens, tokens)) { kept.splice(i, 1); continue; }
+      if (isPrefixContainment(tokens, existingTokens)) { redundant = true; break; }
+    }
+    if (!redundant) kept.push(candidate);
   }
 
-  const sentences = sorted.flatMap((e, idx) => {
-    const results: string[] = [];
-    const y = consume(e.yesterday);
-    if (y) results.push(y);
-
-    // Skip the next-step entry from past-tense conversion.
-    if (!isComplete && idx === nextStepIdx) {
-      seen.add(normalizeKey(e.today)); // mark seen so dedup still works
-      return results;
-    }
-
-    const t = consume(e.today);
-    if (t) results.push(t);
-    return results;
-  });
+  const sentences = kept
+    .filter((c) => !c.excluded)
+    .map((c) => processSentence(c.raw, isComplete))
+    .filter((s): s is string => Boolean(s));
 
   const summary = buildIntroParagraph(sentences);
 

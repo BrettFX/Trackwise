@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
-import { Plus, Zap, Save, RefreshCw, Bookmark, FilePlus, Check, ChevronsUpDown, Trash2, TriangleAlert, Filter, ArrowUpDown, X, Settings } from 'lucide-react';
+import { Plus, Zap, Save, RefreshCw, Bookmark, FilePlus, Check, ChevronsUpDown, Trash2, TriangleAlert, Filter, ArrowUpDown, X, Settings, FlaskConical } from 'lucide-react';
 import StoryCard from './components/StoryCard';
 import OutputPanel from './components/OutputPanel';
 import HistoryPanel from './components/HistoryPanel';
@@ -10,7 +10,8 @@ import OutputSettingsPanel from './components/OutputSettingsPanel';
 import NavPanel from './components/NavPanel';
 import { useUpdater } from './hooks/useUpdater';
 import type { StoryEntry, SavedUpdate, StoryStatus, TaskLineageEntry, TaskListSettings, TaskListSortKey } from './types';
-import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, deleteCheckpoint, deleteCheckpoints, renameUpdate, exportUpdates, exportSingleUpdate, hasUnsavedChanges, loadOutputSettings, saveOutputSettings, loadTaskListSettings, saveTaskListSettings, loadCollapsedTaskIds, saveCollapsedTaskIds, TASK_PRIORITY_LABELS, TASK_PRIORITY_SCORES } from './utils';
+import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, deleteCheckpoint, deleteCheckpoints, renameUpdate, exportUpdates, exportSingleUpdate, hasUnsavedChanges, loadOutputSettings, saveOutputSettings, loadTaskListSettings, saveTaskListSettings, loadCollapsedTaskIds, saveCollapsedTaskIds, upsertSavedUpdate, TASK_PRIORITY_LABELS, TASK_PRIORITY_SCORES } from './utils';
+import { createSampleUpdate } from './sampleData';
 import { storeFileHandle, getHandleForEntry, getAllLinkedFiles, writeEntriesToHandle, removeHandlesForEntries, isFileSystemSaveSupported } from './fileHandleStore';
 import type { OutputSettings } from './types';
 
@@ -673,6 +674,15 @@ function App() {
     saveCollapsedTaskIds(collapsed);
   }
 
+  // Dev-only: seeds a demo update with rich lineage history for quickly testing
+  // features like copy summary, fuzzy duplicate detection, and the AI rewrite.
+  function handleLoadSampleData() {
+    const sample = createSampleUpdate();
+    upsertSavedUpdate(sample);
+    setHistory(loadSavedUpdates());
+    handleLoad(sample);
+  }
+
   function handleLoadSnapshot(parentUpdate: SavedUpdate, snapshotStories: StoryEntry[]) {
     // Resolve fresh parent so the name reflects any renames made after the snapshot was captured
     const freshParent = loadSavedUpdates().find((u) => u.id === parentUpdate.id) ?? parentUpdate;
@@ -799,7 +809,25 @@ function App() {
             >
               <Zap className="w-3 h-3" /> Trackwise
             </button>
+            {import.meta.env.DEV && (
+              <span
+                title="Running from the local dev build"
+                className="inline-flex items-center gap-1 bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest"
+              >
+                Local
+              </span>
+            )}
             <span className="text-sm font-bold text-gray-800 flex-1">Daily Status Update</span>
+            {import.meta.env.DEV && (
+              <button
+                onClick={handleLoadSampleData}
+                title="Load a demo update with sample lineage history for testing"
+                className="flex items-center gap-1.5 bg-white border border-amber-300 text-amber-700 text-xs font-semibold px-2.5 py-1 rounded-lg hover:bg-amber-50 transition-colors"
+              >
+                <FlaskConical className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Load Sample Data</span>
+              </button>
+            )}
             <UpdateNotification
               state={updateState}
               onCheck={checkForUpdates}

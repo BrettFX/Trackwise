@@ -1,9 +1,12 @@
 
-import { useState } from 'react';
-import { X, GripVertical, ChevronDown, ChevronUp, History, Trash2, CheckSquare, Clipboard, ClipboardCheck } from 'lucide-react';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import { X, GripVertical, ChevronDown, ChevronUp, History, Trash2, CheckSquare, Clipboard, ClipboardCheck, TriangleAlert, Sparkles } from 'lucide-react';
 import type { StoryEntry, StoryPriority, StoryStatus, TaskLineageEntry, TaskType } from '../types';
-import { statusDotClass, TASK_PRIORITY_LABELS, TASK_TYPE_LABELS } from '../utils';
+import { statusDotClass, TASK_PRIORITY_LABELS, TASK_TYPE_LABELS, findFuzzyDuplicateLineageGroups } from '../utils';
 import { buildLineageSummary } from '../pastTense';
+import { isTauriApp, getOllamaStatus, loadSelectedModel, pickDefaultModel } from '../ollama';
+import DuplicateLineageModal from './DuplicateLineageModal';
+import AiSummaryModal from './AiSummaryModal';
 
 interface StoryCardProps {
   story: StoryEntry;
@@ -80,10 +83,58 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
   const [confirmDelete, setConfirmDelete] = useState<'single' | 'selected' | 'all' | null>(null);
   const [pendingSingle, setPendingSingle] = useState<{ updateId: string; savedAt: string } | null>(null);
   const [copiedSummary, setCopiedSummary] = useState(false);
+  const [duplicatePrompt, setDuplicatePrompt] = useState(false);
+  const [aiModal, setAiModal] = useState(false);
+  const [aiModels, setAiModels] = useState<string[]>([]);
+  const [aiAvailable, setAiAvailable] = useState(false);
+  const [aiModel, setAiModel] = useState(() => loadSelectedModel());
+
+  // Ollama runs on the user's own machine — check once per session, desktop app only.
+  useEffect(() => {
+    if (!isTauriApp()) return;
+    getOllamaStatus().then((status) => {
+      setAiAvailable(status.available);
+      setAiModels(status.models);
+      if (status.models.length > 0 && !status.models.includes(aiModel)) {
+        setAiModel(pickDefaultModel(status.models));
+      }
+    });
+    // Only run once on mount — aiModel is intentionally excluded to avoid re-checking on every model change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const duplicateGroups = useMemo(() => findFuzzyDuplicateLineageGroups(lineage), [lineage]);
+
+  // Auto-notify only when a *new* lineage entry (e.g. a fresh checkpoint) creates a
+  // fuzzy duplicate — avoids surfacing pre-existing duplicates on every render/mount.
+  const prevLineageLengthRef = useRef(lineage.length);
+  useEffect(() => {
+    const grew = lineage.length > prevLineageLengthRef.current;
+    prevLineageLengthRef.current = lineage.length;
+    if (grew && duplicateGroups.length > 0) setDuplicatePrompt(true);
+  }, [lineage, duplicateGroups]);
+
+  function handleCleanupDuplicates() {
+    if (onDeleteLineageEntries) {
+      const toRemove = duplicateGroups.flatMap((group) => {
+        const sorted = [...group].sort((a, b) => new Date(a.savedAt).getTime() - new Date(b.savedAt).getTime());
+        const keepId = sorted[sorted.length - 1].id;
+        return sorted
+          .filter((e) => e.id !== keepId && e.checkpoint)
+          .map((e) => ({ updateId: e.updateId, savedAt: e.savedAt }));
+      });
+      if (toRemove.length > 0) onDeleteLineageEntries(toRemove);
+    }
+    setDuplicatePrompt(false);
+  }
+
+  function buildExtractiveSummary(): string {
+    const isComplete = story.status === 'done';
+    return buildLineageSummary(sortedLineage.map((e) => ({ savedAt: e.savedAt, yesterday: e.yesterday, today: e.today })), isComplete);
+  }
 
   function handleCopySummary() {
-    const isComplete = story.status === 'done';
-    const summary = buildLineageSummary(sortedLineage.map((e) => ({ savedAt: e.savedAt, yesterday: e.yesterday, today: e.today })), isComplete);
+    const summary = buildExtractiveSummary();
     if (!summary) return;
     navigator.clipboard.writeText(summary).then(() => {
       setCopiedSummary(true);
@@ -365,6 +416,17 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
                 </button>
                 {lineageOpen && (
                   <div className="flex items-center gap-2">
+                    {/* Fuzzy duplicate indicator — opens the cleanup modal on demand */}
+                    {!selectMode && duplicateGroups.length > 0 && (
+                      <button
+                        onClick={() => setDuplicatePrompt(true)}
+                        className="flex items-center gap-1 text-xs text-amber-500 hover:text-amber-600 transition-colors"
+                        title="Review possible duplicate entries"
+                      >
+                        <TriangleAlert className="w-3.5 h-3.5" />
+                        {duplicateGroups.length} possible {duplicateGroups.length === 1 ? 'duplicate' : 'duplicates'}
+                      </button>
+                    )}
                     {/* Copy summary — visible whenever there is today content, regardless of checkpoints */}
                     {!selectMode && sortedLineage.some((e) => e.today.trim()) && (
                       <button
@@ -374,6 +436,17 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
                       >
                         {copiedSummary ? <ClipboardCheck className="w-3.5 h-3.5" /> : <Clipboard className="w-3.5 h-3.5" />}
                         {copiedSummary ? 'Copied!' : 'Copy summary'}
+                      </button>
+                    )}
+                    {/* AI rewrite (Beta) — desktop-only, requires a local Ollama instance */}
+                    {!selectMode && aiAvailable && sortedLineage.some((e) => e.today.trim()) && (
+                      <button
+                        onClick={() => setAiModal(true)}
+                        className="flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-500 transition-colors"
+                        title="Rewrite summary with a local AI model (Ollama)"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        AI rewrite
                       </button>
                     )}
                     {/* Select / delete controls — only when checkpoint entries exist */}
@@ -546,6 +619,24 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
             </div>
           )}
         </div>
+      )}
+
+      {duplicatePrompt && (
+        <DuplicateLineageModal
+          groups={duplicateGroups}
+          onCleanup={handleCleanupDuplicates}
+          onDismiss={() => setDuplicatePrompt(false)}
+        />
+      )}
+
+      {aiModal && (
+        <AiSummaryModal
+          extractiveSummary={buildExtractiveSummary()}
+          model={aiModel}
+          availableModels={aiModels}
+          onModelChange={setAiModel}
+          onClose={() => setAiModal(false)}
+        />
       )}
     </div>
   );
