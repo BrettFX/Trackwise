@@ -1,9 +1,11 @@
 // Optional, opt-in abstractive rewrite of the (already deduped) extractive lineage
 // summary via a locally-running Ollama instance. Desktop (Tauri) only — this never
 // makes network calls in the browser dev build, and never talks to anything but the
-// user's own machine (http://localhost:11434), so no data leaves the device.
+// user's own machine (http://127.0.0.1:11434), so no data leaves the device.
 
-const BASE_URL = 'http://localhost:11434';
+// Use the literal loopback IP, not "localhost" — on some Windows configurations
+// "localhost" resolves to the IPv6 ::1 first, which Ollama (bound to 127.0.0.1) never answers on.
+const BASE_URL = 'http://127.0.0.1:11434';
 export const DEFAULT_MODEL = 'qwen2.5:1.5b';
 const MODEL_STORAGE_KEY = 'trackwise-ollama-model';
 
