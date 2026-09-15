@@ -143,7 +143,10 @@ function dedupeTaskLineage(entries: TaskLineageEntry[]): TaskLineageEntry[] {
   return sorted.reduce<TaskLineageEntry[]>((deduped, entry) => {
     const last = deduped[deduped.length - 1];
     if (last && taskLineageFingerprint(last) === taskLineageFingerprint(entry)) {
-      deduped[deduped.length - 1] = entry.checkpoint ? last : entry;
+      // Prefer the checkpoint entry over the mutable "current" one — the current
+      // entry always mirrors the latest checkpoint's content right after it's
+      // taken, so keeping it here would silently erase that checkpoint from lineage.
+      deduped[deduped.length - 1] = last.checkpoint && !entry.checkpoint ? last : entry;
       return deduped;
     }
     deduped.push(entry);

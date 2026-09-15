@@ -150,7 +150,9 @@ export default function StoryCard({ story, index, total, collapsed, onToggleColl
   const fullTitle = story.title.trim() || summaryLabel;
   const hasErrors = Object.keys(errors).length > 0;
   const activeDot = statusDotClass(status);
-  const hasLineage = story.carryOver || lineage.length > 1;
+  // A single checkpoint still counts as lineage worth showing, even though
+  // dedup collapses it with the "current" entry it mirrors.
+  const hasLineage = story.carryOver || lineage.length > 1 || lineage.some((e) => e.checkpoint);
 
   function extractTicketFromUrl(url: string): string | null {
     const match = url.match(/\/([A-Z]+-\d+)\s*$/i);
