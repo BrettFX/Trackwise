@@ -1,10 +1,11 @@
-import type { StoryEntry, SavedUpdate, UpdateSnapshot, StoryStatus, StoryPriority, TaskType, OutputSettings, TaskListSettings, TaskLineageEntry } from './types';
+import type { StoryEntry, SavedUpdate, UpdateSnapshot, StoryStatus, StoryPriority, TaskType, OutputSettings, TaskListSettings, TaskLineageEntry, ArchivedTask } from './types';
 import { textSimilarity, DEFAULT_FUZZY_THRESHOLD } from './fuzzyMatch';
 
 const STORAGE_KEY = 'ytb-saved-updates';
 const OUTPUT_SETTINGS_KEY = 'trackwise-output-settings';
 const TASK_LIST_SETTINGS_KEY = 'trackwise-task-list-settings';
 const COLLAPSED_TASK_IDS_KEY = 'trackwise-collapsed-task-ids';
+const ARCHIVED_TASKS_KEY = 'ytb-archived-tasks';
 
 export const DEFAULT_OUTPUT_SETTINGS: OutputSettings = {
   showStatus: true,
@@ -186,6 +187,46 @@ export function upsertSavedUpdate(update: SavedUpdate): void {
   const all = loadSavedUpdates().filter((u) => u.id !== update.id);
   all.unshift(update);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+}
+
+export function loadArchivedTasks(): ArchivedTask[] {
+  try {
+    const raw = localStorage.getItem(ARCHIVED_TASKS_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as ArchivedTask[];
+  } catch {
+    return [];
+  }
+}
+
+/** Move a deleted task into the trash instead of discarding it outright. */
+export function archiveTask(story: StoryEntry, sourceUpdateId: string | null, sourceUpdateName: string | null): ArchivedTask {
+  const entry: ArchivedTask = { story, deletedAt: new Date().toISOString(), sourceUpdateId, sourceUpdateName };
+  const all = loadArchivedTasks();
+  all.unshift(entry);
+  localStorage.setItem(ARCHIVED_TASKS_KEY, JSON.stringify(all));
+  return entry;
+}
+
+/** Move a trashed task back out of the archive. Caller is responsible for re-inserting the returned story. */
+export function restoreArchivedTask(storyId: string): ArchivedTask | null {
+  const all = loadArchivedTasks();
+  const idx = all.findIndex((a) => a.story.id === storyId);
+  if (idx < 0) return null;
+  const [entry] = all.splice(idx, 1);
+  localStorage.setItem(ARCHIVED_TASKS_KEY, JSON.stringify(all));
+  return entry;
+}
+
+/** Permanently remove a single trashed task. */
+export function deleteArchivedTask(storyId: string): void {
+  const all = loadArchivedTasks().filter((a) => a.story.id !== storyId);
+  localStorage.setItem(ARCHIVED_TASKS_KEY, JSON.stringify(all));
+}
+
+/** Empty the trash — permanently removes every archived task. */
+export function clearArchivedTasks(): void {
+  localStorage.setItem(ARCHIVED_TASKS_KEY, JSON.stringify([]));
 }
 
 /** Silently sync stories/name — no changelog entry created. */

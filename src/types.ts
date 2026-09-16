@@ -73,3 +73,10 @@ export interface TaskLineageEntry {
   note?: string;
   checkpoint: boolean;
 }
+
+export interface ArchivedTask {
+  story: StoryEntry;
+  deletedAt: string;
+  sourceUpdateId: string | null;
+  sourceUpdateName: string | null;
+}

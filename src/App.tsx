@@ -1,16 +1,17 @@
 import { useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
-import { Plus, Zap, Save, RefreshCw, Bookmark, FilePlus, Check, ChevronsUpDown, Trash2, TriangleAlert, Filter, ArrowUpDown, X, Settings, FlaskConical } from 'lucide-react';
+import { Plus, Zap, Save, RefreshCw, Bookmark, FilePlus, Check, ChevronsUpDown, Trash2, TriangleAlert, Filter, ArrowUpDown, X, Settings, FlaskConical, Archive } from 'lucide-react';
 import StoryCard from './components/StoryCard';
 import OutputPanel from './components/OutputPanel';
 import HistoryPanel from './components/HistoryPanel';
 import ImportModal from './components/ImportModal';
+import ArchivedTasksPanel from './components/ArchivedTasksPanel';
 import VersionInfo from './components/VersionInfo';
 import UpdateNotification from './components/UpdateNotification';
 import OutputSettingsPanel from './components/OutputSettingsPanel';
 import NavPanel from './components/NavPanel';
 import { useUpdater } from './hooks/useUpdater';
-import type { StoryEntry, SavedUpdate, StoryStatus, TaskLineageEntry, TaskListSettings, TaskListSortKey } from './types';
-import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, deleteCheckpoint, deleteCheckpoints, renameUpdate, exportUpdates, exportSingleUpdate, hasUnsavedChanges, loadOutputSettings, saveOutputSettings, loadTaskListSettings, saveTaskListSettings, loadCollapsedTaskIds, saveCollapsedTaskIds, upsertSavedUpdate, TASK_PRIORITY_LABELS, TASK_PRIORITY_SCORES } from './utils';
+import type { StoryEntry, SavedUpdate, StoryStatus, TaskLineageEntry, TaskListSettings, TaskListSortKey, ArchivedTask } from './types';
+import { makeEmptyStory, formatOutputHTML, loadSavedUpdates, saveAsNew, silentSave, saveCheckpoint, deleteUpdate, deleteCheckpoint, deleteCheckpoints, renameUpdate, exportUpdates, exportSingleUpdate, hasUnsavedChanges, loadOutputSettings, saveOutputSettings, loadTaskListSettings, saveTaskListSettings, loadCollapsedTaskIds, saveCollapsedTaskIds, upsertSavedUpdate, loadArchivedTasks, archiveTask, restoreArchivedTask, deleteArchivedTask, clearArchivedTasks, TASK_PRIORITY_LABELS, TASK_PRIORITY_SCORES } from './utils';
 import { createSampleUpdate } from './sampleData';
 import { storeFileHandle, getHandleForEntry, getAllLinkedFiles, writeEntriesToHandle, removeHandlesForEntries, isFileSystemSaveSupported } from './fileHandleStore';
 import type { OutputSettings } from './types';
@@ -195,6 +196,8 @@ function App() {
   const [currentUpdateId, setCurrentUpdateId] = useState<string | null>(null);
   const [outputSettings, setOutputSettings] = useState<OutputSettings>(() => loadOutputSettings());
   const [taskListSettings, setTaskListSettings] = useState<TaskListSettings>(() => loadTaskListSettings());
+  const [archivedTasks, setArchivedTasks] = useState<ArchivedTask[]>(() => loadArchivedTasks());
+  const [archivePanelOpen, setArchivePanelOpen] = useState(false);
 
   // ── Linked file handles (File System Access API) ─────────────────────
   // Maps entry ID → file name for entries that were imported from a file.
@@ -532,7 +535,21 @@ function App() {
     draggingStoryIdRef.current = null;
   }
 
+  // ── Remove task (with confirmation + trash) ─────────────────────────
+  const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null);
+
   const handleRemove = useCallback((id: string) => {
+    setPendingRemoveId(id);
+  }, []);
+
+  function confirmRemoveStory() {
+    const id = pendingRemoveId;
+    if (!id) return;
+    const story = stories.find((s) => s.id === id);
+    if (story) {
+      archiveTask(story, currentUpdateId, currentUpdateId ? saveName || null : null);
+      setArchivedTasks(loadArchivedTasks());
+    }
     setStories((prev) => prev.filter((s) => s.id !== id));
     setCollapsedIds((prev) => {
       const next = new Set(prev);
@@ -540,7 +557,25 @@ function App() {
       saveCollapsedTaskIds(next);
       return next;
     });
-  }, []);
+    setPendingRemoveId(null);
+  }
+
+  function handleRestoreArchivedTask(storyId: string) {
+    const entry = restoreArchivedTask(storyId);
+    if (!entry) return;
+    setArchivedTasks(loadArchivedTasks());
+    setStories((prev) => [...prev, { ...entry.story, sequenceNumber: nextSequenceNumber(prev) }]);
+  }
+
+  function handleDeleteArchivedTask(storyId: string) {
+    deleteArchivedTask(storyId);
+    setArchivedTasks(loadArchivedTasks());
+  }
+
+  function handleEmptyTrash() {
+    clearArchivedTasks();
+    setArchivedTasks([]);
+  }
 
   const addStory = () => {
     setStories((prev) => [...prev, makeEmptyStory(nextSequenceNumber(prev))]);
@@ -831,6 +866,19 @@ function App() {
                 <span className="hidden sm:inline">Load Sample Data</span>
               </button>
             )}
+            <button
+              onClick={() => setArchivePanelOpen(true)}
+              title="Archived tasks"
+              className="relative flex items-center gap-1.5 bg-white border border-gray-200 text-gray-500 text-xs font-semibold px-2.5 py-1 rounded-lg hover:bg-gray-50 hover:text-indigo-600 transition-colors"
+            >
+              <Archive className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Archived</span>
+              {archivedTasks.length > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[1.1rem] h-[1.1rem] rounded-full bg-red-500 text-white text-[10px] font-bold px-1">
+                  {archivedTasks.length}
+                </span>
+              )}
+            </button>
             <UpdateNotification
               state={updateState}
               onCheck={checkForUpdates}
@@ -1042,6 +1090,53 @@ function App() {
         {importOpen && (
           <ImportModal onClose={() => setImportOpen(false)} onImported={handleImportDone} />
         )}
+
+        {/* Archived tasks (trash) panel */}
+        {archivePanelOpen && (
+          <ArchivedTasksPanel
+            archivedTasks={archivedTasks}
+            onClose={() => setArchivePanelOpen(false)}
+            onRestore={handleRestoreArchivedTask}
+            onDeletePermanently={handleDeleteArchivedTask}
+            onEmptyTrash={handleEmptyTrash}
+          />
+        )}
+
+        {/* Remove task confirmation modal */}
+        {pendingRemoveId !== null && (() => {
+          const target = stories.find((s) => s.id === pendingRemoveId);
+          return (
+            <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-9 h-9 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                    <Trash2 className="w-4 h-4 text-red-500" />
+                  </div>
+                  <h2 className="text-base font-bold text-gray-900">Delete Task</h2>
+                </div>
+                <p className="text-sm text-gray-600 mb-5">
+                  Are you sure you want to delete{' '}
+                  <span className="font-semibold text-gray-800">&ldquo;{target?.title.trim() || 'this task'}&rdquo;</span>?{' '}
+                  It will be moved to Archived Tasks, where you can restore it or delete it permanently.
+                </p>
+                <div className="flex gap-3 justify-end">
+                  <button
+                    onClick={() => setPendingRemoveId(null)}
+                    className="text-sm px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmRemoveStory}
+                    className="flex items-center gap-2 text-sm px-4 py-2 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* About modal */}
         {aboutOpen && (

@@ -1,6 +1,6 @@
 {
   "productName": "Trackwise",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "identifier": "com.trackwise.app",
   "build": {
     "frontendDist": "../dist",
