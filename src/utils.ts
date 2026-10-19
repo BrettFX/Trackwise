@@ -1,4 +1,6 @@
 import type { StoryEntry, SavedUpdate, UpdateSnapshot, StoryStatus, StoryPriority, TaskType, OutputSettings, TaskListSettings, TaskLineageEntry, ArchivedTask } from './types';
+import { zipSync } from 'fflate';
+import { isTauriApp } from './ollama';
 import { textSimilarity, DEFAULT_FUZZY_THRESHOLD } from './fuzzyMatch';
 
 const STORAGE_KEY = 'ytb-saved-updates';
@@ -386,14 +388,26 @@ function makeExportPayload(updates: SavedUpdate[]): ExportPayload {
   };
 }
 
-function downloadExport(updates: SavedUpdate[], fileName: string): void {
-  const blob = new Blob([JSON.stringify(makeExportPayload(updates), null, 2)], { type: 'application/json' });
+function downloadBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = fileName;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function downloadExport(updates: SavedUpdate[], fileName: string): void {
+  downloadBlob(new Blob([JSON.stringify(makeExportPayload(updates), null, 2)], { type: 'application/json' }), fileName);
+}
+
+/** "AIF-410 27.1 Sprint 1" -> "AIF-410-27.1-Sprint-1-trackwise-export.json" */
+export function exportFileNameFor(name: string): string {
+  const slug = name
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\\/:*?"<>|\u0000-\u001f\s]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${slug || 'saved-update'}-trackwise-export.json`;
 }
 
 async function saveExport(updates: SavedUpdate[], suggestedName: string): Promise<FileSystemFileHandle | undefined> {
@@ -430,10 +444,163 @@ export async function exportUpdates(): Promise<ExportResult> {
 export async function exportSingleUpdate(id: string): Promise<ExportResult | null> {
   const update = loadSavedUpdates().find((u) => u.id === id);
   if (!update) return null;
-  const date = new Date().toISOString().slice(0, 10);
-  const slug = update.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const handle = await saveExport([update], `trackwise-${slug}-${date}.json`);
+  const handle = await saveExport([update], exportFileNameFor(update.name));
   return { handle, entryIds: [update.id] };
+}
+
+// ── Share (email draft) ──────────────────────────────────────────────────────
+
+function toBase64(bytes: Uint8Array): string {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
+}
+
+function wrap76(s: string): string {
+  return (s.match(/.{1,76}/g) ?? []).join('\r\n');
+}
+
+/** RFC 2047 encoded-word for non-ASCII header values. */
+function encodeHeader(value: string): string {
+   
+  if (/^[\x20-\x7e]*$/.test(value)) return value;
+  const bytes = new TextEncoder().encode(value);
+  return `=?UTF-8?B?${toBase64(bytes)}?=`;
+}
+
+function dedupeName(name: string, used: Set<string>): string {
+  if (!used.has(name)) { used.add(name); return name; }
+  const base = name.replace(/\.json$/, '');
+  let n = 2;
+  while (used.has(`${base}-${n}.json`)) n++;
+  const unique = `${base}-${n}.json`;
+  used.add(unique);
+  return unique;
+}
+
+export interface ShareOptions {
+  to?: string[];
+  subject?: string;
+  message?: string;
+}
+
+export function defaultShareSubject(updates: SavedUpdate[]): string {
+  return updates.length === 1
+    ? `Trackwise: ${updates[0].name}`
+    : `Trackwise Export – ${updates.length} saved updates`;
+}
+
+export function isValidEmail(value: string): boolean {
+  return /^[^\s@<>,;"]+@[^\s@<>,;"]+\.[^\s@<>,;"]+$/.test(value);
+}
+
+const RECIPIENTS_KEY = 'trackwise-share-recipients';
+
+/** Previously used recipient addresses, most recent first. */
+export function loadRecentRecipients(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECIPIENTS_KEY) ?? '[]');
+    return Array.isArray(parsed) ? parsed.filter((e): e is string => typeof e === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export function rememberRecipients(emails: string[]): void {
+  try {
+    const merged = [...emails, ...loadRecentRecipients()];
+    const unique = merged.filter((e, i) => merged.findIndex((x) => x.toLowerCase() === e.toLowerCase()) === i);
+    localStorage.setItem(RECIPIENTS_KEY, JSON.stringify(unique.slice(0, 30)));
+  } catch { /* storage unavailable */ }
+}
+
+/** Build an unsent .eml email draft with the selected updates attached: one JSON
+ *  file for a single update, or a zip of JSON files for several. */
+export function buildShareDraft(
+  updates: SavedUpdate[],
+  options: ShareOptions = {},
+): { fileName: string; blob: Blob } {
+  const enc = new TextEncoder();
+  const subject = options.subject?.trim() || defaultShareSubject(updates);
+  let attachName: string;
+  let attachType: string;
+  let attachBytes: Uint8Array;
+
+  if (updates.length === 1) {
+    const u = updates[0];
+    attachName = exportFileNameFor(u.name);
+    attachType = 'application/json';
+    attachBytes = enc.encode(JSON.stringify(makeExportPayload([u]), null, 2));
+  } else {
+    const used = new Set<string>();
+    const files: Record<string, Uint8Array> = {};
+    for (const u of updates) {
+      files[dedupeName(exportFileNameFor(u.name), used)] =
+        enc.encode(JSON.stringify(makeExportPayload([u]), null, 2));
+    }
+    attachName = 'trackwise-exports.zip';
+    attachType = 'application/zip';
+    attachBytes = zipSync(files);
+  }
+
+  const boundary = `----=_Trackwise_${crypto.randomUUID()}`;
+  const message = options.message?.trim();
+  const bodyText = [
+    ...(message ? [message.replace(/\r?\n/g, '\r\n'), ''] : []),
+    'Trackwise export attached. Import it via Import in Trackwise.',
+    '',
+    ...updates.map((u) => `- ${u.name}`),
+  ].join('\r\n');
+
+  const to = (options.to ?? []).filter(isValidEmail);
+
+  const eml = [
+    'X-Unsent: 1',
+    ...(to.length > 0 ? [`To: ${to.join(', ')}`] : []),
+    `Subject: ${encodeHeader(subject)}`,
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    wrap76(toBase64(enc.encode(bodyText))),
+    '',
+    `--${boundary}`,
+    `Content-Type: ${attachType}; name="${attachName}"`,
+    'Content-Transfer-Encoding: base64',
+    `Content-Disposition: attachment; filename="${attachName}"`,
+    '',
+    wrap76(toBase64(attachBytes)),
+    '',
+    `--${boundary}--`,
+    '',
+  ].join('\r\n');
+
+  return {
+    fileName: updates.length === 1 ? attachName.replace(/\.json$/, '.eml') : 'trackwise-exports.eml',
+    blob: new Blob([eml], { type: 'message/rfc822' }),
+  };
+}
+
+/** Open the email draft in the user's default mail client (desktop app) or, where
+ *  that isn't possible, download the .eml. Resolves to which one happened. */
+export async function shareUpdates(updates: SavedUpdate[], options: ShareOptions = {}): Promise<'opened' | 'downloaded'> {
+  const { fileName, blob } = buildShareDraft(updates, options);
+  if (isTauriApp()) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('open_mail_draft', { fileName, contents: await blob.text() });
+      return 'opened';
+    } catch {
+      // fall through to a normal download
+    }
+  }
+  downloadBlob(blob, fileName);
+  return 'downloaded';
 }
 
 export type ImportMode = 'merge' | 'replace';

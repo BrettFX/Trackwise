@@ -1,9 +1,10 @@
 import { useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
-import { Plus, Zap, Save, RefreshCw, Bookmark, FilePlus, Check, ChevronsUpDown, Trash2, TriangleAlert, Filter, ArrowUpDown, X, Settings, FlaskConical, Archive } from 'lucide-react';
+import { Plus, Zap, Save, RefreshCw, Bookmark, FilePlus, Check, ChevronsUpDown, Trash2, TriangleAlert, Filter, ArrowUpDown, X, Settings, FlaskConical, Archive, Share2 } from 'lucide-react';
 import StoryCard from './components/StoryCard';
 import OutputPanel from './components/OutputPanel';
 import HistoryPanel from './components/HistoryPanel';
 import ImportModal from './components/ImportModal';
+import ShareModal from './components/ShareModal';
 import ArchivedTasksPanel from './components/ArchivedTasksPanel';
 import VersionInfo from './components/VersionInfo';
 import UpdateNotification from './components/UpdateNotification';
@@ -793,6 +794,7 @@ function App() {
   }
 
   const [importOpen, setImportOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [unsavedWarning, setUnsavedWarning] = useState(false);
 
   function openImport() {
@@ -878,6 +880,14 @@ function App() {
                   {archivedTasks.length}
                 </span>
               )}
+            </button>
+            <button
+              onClick={() => setShareOpen(true)}
+              title="Share saved exports via email"
+              className="flex items-center gap-1.5 bg-white border border-gray-200 text-gray-500 text-xs font-semibold px-2.5 py-1 rounded-lg hover:bg-gray-50 hover:text-indigo-600 transition-colors"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Share</span>
             </button>
             <UpdateNotification
               state={updateState}
@@ -1089,6 +1099,11 @@ function App() {
         {/* Import modal */}
         {importOpen && (
           <ImportModal onClose={() => setImportOpen(false)} onImported={handleImportDone} />
+        )}
+
+        {/* Share modal */}
+        {shareOpen && (
+          <ShareModal entries={history} onClose={() => setShareOpen(false)} />
         )}
 
         {/* Archived tasks (trash) panel */}
